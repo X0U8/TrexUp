@@ -13,12 +13,14 @@ export default function App() {
     height: window.innerHeight,
   });
 
+  const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
+
   const [nodes, setNodes] = useState({
     node1: { id: 'node1', x: 0, y: 0, width: NODE_WIDTH, height: NODE_HEIGHT },
     node2: { id: 'node2', x: 0, y: 0, width: NODE_WIDTH, height: NODE_HEIGHT },
   });
 
-  // Track resize & position the two blocks nicely side-by-side on initial mount
+  // Track viewport resize & position the two blocks nicely side-by-side initially
   useEffect(() => {
     const handleResize = () => {
       setViewport({
@@ -68,35 +70,42 @@ export default function App() {
   };
 
   return (
-    <DotGridCanvas>
-      {/* Top-Right Expandable Minimap */}
+    <>
+      {/* Top-Right Expandable Interactive Minimap */}
       <Minimap
         nodes={nodes}
+        camera={camera}
         viewportWidth={viewport.width}
         viewportHeight={viewport.height}
+        onCameraChange={setCamera}
       />
 
-      {/* Dynamic non-fixed grey connecting thread */}
-      <Thread start={nodes.node1} end={nodes.node2} />
+      {/* Pannable & Zoomable Dot Grid Canvas */}
+      <DotGridCanvas camera={camera} onCameraChange={setCamera}>
+        {/* Dynamic non-fixed grey connecting thread */}
+        <Thread start={nodes.node1} end={nodes.node2} />
 
-      {/* Two movable glass blocks */}
-      <MovableNode
-        id="node1"
-        x={nodes.node1.x}
-        y={nodes.node1.y}
-        width={nodes.node1.width}
-        height={nodes.node1.height}
-        onMove={handleNodeMove}
-      />
+        {/* The two movable glass blocks */}
+        <MovableNode
+          id="node1"
+          x={nodes.node1.x}
+          y={nodes.node1.y}
+          width={nodes.node1.width}
+          height={nodes.node1.height}
+          zoom={camera.zoom}
+          onMove={handleNodeMove}
+        />
 
-      <MovableNode
-        id="node2"
-        x={nodes.node2.x}
-        y={nodes.node2.y}
-        width={nodes.node2.width}
-        height={nodes.node2.height}
-        onMove={handleNodeMove}
-      />
-    </DotGridCanvas>
+        <MovableNode
+          id="node2"
+          x={nodes.node2.x}
+          y={nodes.node2.y}
+          width={nodes.node2.width}
+          height={nodes.node2.height}
+          zoom={camera.zoom}
+          onMove={handleNodeMove}
+        />
+      </DotGridCanvas>
+    </>
   );
 }

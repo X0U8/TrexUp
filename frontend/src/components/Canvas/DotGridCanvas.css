@@ -7,14 +7,21 @@
     radial-gradient(circle at 18% 18%, rgba(219, 234, 254, 0.6) 0%, transparent 50%),
     radial-gradient(circle at 82% 82%, rgba(191, 219, 254, 0.5) 0%, transparent 55%),
     linear-gradient(135deg, #f0f7ff 0%, #e2effe 40%, #d8ecff 75%, #ffffff 100%);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
 
-/* Node editor style dot grid */
+.canvas-viewport.panning {
+  cursor: grabbing;
+}
+
+/* Dynamic dot grid matching camera zoom and pan */
 .dot-grid-matrix {
   position: absolute;
-  inset: -100px;
+  inset: 0;
   background-image: radial-gradient(circle, rgba(59, 130, 246, 0.28) 1.5px, transparent 1.5px);
-  background-size: 28px 28px;
   pointer-events: none;
   z-index: 1;
 }
@@ -43,4 +50,20 @@
   bottom: -160px;
   right: -120px;
   background: radial-gradient(circle, rgba(96, 165, 250, 0.35) 0%, transparent 70%);
+}
+
+/* Transformed World Layer */
+.world-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: 0 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.world-layer > * {
+  pointer-events: auto;
 }

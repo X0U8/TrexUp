@@ -1,11 +1,12 @@
 import { useState, useRef } from 'react';
 import './MovableNode.css';
 
-export default function MovableNode({ id, x, y, width = 320, height = 200, onMove }) {
+export default function MovableNode({ id, x, y, width = 320, height = 200, zoom = 1, onMove }) {
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, initialX: 0, initialY: 0 });
 
   const handlePointerDown = (e) => {
+    e.stopPropagation(); // prevent panning canvas while dragging node
     setIsDragging(true);
     dragStartRef.current = {
       mouseX: e.clientX,
@@ -18,8 +19,8 @@ export default function MovableNode({ id, x, y, width = 320, height = 200, onMov
 
   const handlePointerMove = (e) => {
     if (!isDragging) return;
-    const deltaX = e.clientX - dragStartRef.current.mouseX;
-    const deltaY = e.clientY - dragStartRef.current.mouseY;
+    const deltaX = (e.clientX - dragStartRef.current.mouseX) / zoom;
+    const deltaY = (e.clientY - dragStartRef.current.mouseY) / zoom;
 
     onMove(id, dragStartRef.current.initialX + deltaX, dragStartRef.current.initialY + deltaY);
   };
