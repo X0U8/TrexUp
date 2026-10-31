@@ -1,0 +1,111 @@
+.minimap-container {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  z-index: 50;
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 18px;
+  box-shadow: 
+    0 16px 36px -10px rgba(37, 99, 235, 0.1),
+    0 6px 16px -6px rgba(0, 0, 0, 0.04),
+    inset 0 1px 1px rgba(255, 255, 255, 0.95);
+  overflow: hidden;
+  transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              height 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.3s ease;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Compact vs Expanded sizing */
+.minimap-container.compact {
+  width: 190px;
+  height: 135px;
+}
+
+.minimap-container.expanded {
+  width: 330px;
+  height: 235px;
+  box-shadow: 
+    0 24px 50px -12px rgba(37, 99, 235, 0.18),
+    0 12px 24px -8px rgba(0, 0, 0, 0.06),
+    inset 0 1px 2px rgba(255, 255, 255, 1);
+}
+
+.minimap-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: rgba(248, 250, 252, 0.55);
+}
+
+/* Subtle dot texture on minimap */
+.minimap-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(148, 163, 184, 0.22) 1px, transparent 1px);
+  background-size: 14px 14px;
+  pointer-events: none;
+}
+
+/* Middle box: the visible area viewfinder */
+.minimap-viewfinder {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 
+    0 4px 12px rgba(0, 0, 0, 0.04),
+    inset 0 1px 1px #ffffff;
+  border-radius: 8px;
+  pointer-events: none;
+  transition: transform 0.15s ease-out, width 0.35s ease, height 0.35s ease;
+}
+
+/* Small rectangles representing nodes/bars */
+.minimap-bar {
+  position: absolute;
+  background: rgba(226, 232, 240, 0.95);
+  border: 1px solid rgba(203, 213, 225, 0.7);
+  border-radius: 3px;
+  transition: transform 0.1s ease-out, width 0.35s ease, height 0.35s ease;
+  pointer-events: none;
+}
+
+/* Floating expand/collapse control trigger */
+.minimap-expand-btn {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  opacity: 0.6;
+  transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  z-index: 10;
+}
+
+.minimap-container:hover .minimap-expand-btn {
+  opacity: 1;
+}
+
+.minimap-expand-btn:hover {
+  background: #ffffff;
+  transform: scale(1.08);
+  color: #334155;
+}
+
+.minimap-expand-btn svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2;
+}

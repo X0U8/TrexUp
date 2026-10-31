@@ -3,7 +3,7 @@ import './Thread.css';
 export default function Thread({ start, end }) {
   if (!start || !end) return null;
 
-  // Calculate connection anchor ports (e.g. from right of start node to left of end node, or dynamically oriented)
+  // Calculate connection anchor ports
   const isStartLeft = start.x + start.width / 2 < end.x + end.width / 2;
 
   const startX = isStartLeft ? start.x + start.width : start.x;
@@ -26,29 +26,18 @@ export default function Thread({ start, end }) {
 
   return (
     <svg className="thread-svg-layer">
-      <defs>
-        <linearGradient id="thread-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#38bdf8" />
-          <stop offset="50%" stopColor="#60a5fa" />
-          <stop offset="100%" stopColor="#93c5fd" />
-        </linearGradient>
-      </defs>
-
-      {/* Ambient glow beneath thread */}
+      {/* Soft muted grey glow */}
       <path d={pathData} className="thread-glow" />
 
-      {/* Main cable thread */}
+      {/* Main clean grey cable */}
       <path d={pathData} className="thread-core" />
 
-      {/* Subtle animated energy flow dash */}
-      <path d={pathData} className="thread-flow" />
-
       {/* Port terminal caps */}
-      <circle cx={startX} cy={startY} r={5} className="thread-port-glow" />
-      <circle cx={startX} cy={startY} r={2.5} className="thread-port-core" />
+      <circle cx={startX} cy={startY} r={4.5} className="thread-port-glow" />
+      <circle cx={startX} cy={startY} r={2} className="thread-port-core" />
 
-      <circle cx={endX} cy={endY} r={5} className="thread-port-glow" />
-      <circle cx={endX} cy={endY} r={2.5} className="thread-port-core" />
+      <circle cx={endX} cy={endY} r={4.5} className="thread-port-glow" />
+      <circle cx={endX} cy={endY} r={2} className="thread-port-core" />
     </svg>
   );
 }
