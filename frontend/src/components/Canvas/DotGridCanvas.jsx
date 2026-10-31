@@ -36,11 +36,13 @@ export default function DotGridCanvas({ camera, onCameraChange, children }) {
   }, [camera, onCameraChange]);
 
   const handlePointerDown = (e) => {
-    // Only pan if clicking on canvas background directly, not on a node, minimap, or zoom controls
+    // Only pan if clicking on canvas background directly, not on UI docks or nodes
     if (
       e.target.closest('.movable-node') ||
       e.target.closest('.minimap-container') ||
-      e.target.closest('.zoom-controls')
+      e.target.closest('.bottom-left-dock') ||
+      e.target.closest('.sidebar-container') ||
+      e.target.closest('.upload-modal-container')
     ) {
       return;
     }
