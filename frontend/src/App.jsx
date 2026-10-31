@@ -6,7 +6,7 @@ import Minimap from './components/Minimap/Minimap';
 import ZoomControls from './components/Controls/ZoomControls';
 
 const NODE_WIDTH = 320;
-const NODE_HEIGHT = 200;
+const NODE_HEIGHT = 110;
 
 export default function App() {
   const [viewport, setViewport] = useState({

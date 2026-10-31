@@ -4,7 +4,7 @@
   background: rgba(255, 255, 255, 0.55);
   backdrop-filter: blur(32px) saturate(190%);
   -webkit-backdrop-filter: blur(32px) saturate(190%);
-  border-radius: 26px;
+  border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.9);
   box-shadow: 
     0 24px 50px -12px rgba(37, 99, 235, 0.15),
@@ -43,10 +43,10 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 55%;
+  height: 50%;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.65) 0%, transparent 100%);
   pointer-events: none;
-  border-radius: 26px 26px 0 0;
+  border-radius: 20px 20px 0 0;
 }
 
 /* Inner luminous soft light */
@@ -55,9 +55,9 @@
   position: absolute;
   bottom: -20px;
   right: -20px;
-  width: 130px;
-  height: 130px;
+  width: 100px;
+  height: 100px;
   background: radial-gradient(circle, rgba(147, 197, 253, 0.4) 0%, transparent 70%);
-  filter: blur(20px);
+  filter: blur(18px);
   pointer-events: none;
 }

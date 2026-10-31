@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import './MovableNode.css';
 
-export default function MovableNode({ id, x, y, width = 320, height = 200, zoom = 1, onMove }) {
+export default function MovableNode({ id, x, y, width = 320, height = 110, zoom = 1, onMove }) {
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, initialX: 0, initialY: 0 });
 
