@@ -1,0 +1,46 @@
+.canvas-viewport {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: 
+    radial-gradient(circle at 18% 18%, rgba(219, 234, 254, 0.6) 0%, transparent 50%),
+    radial-gradient(circle at 82% 82%, rgba(191, 219, 254, 0.5) 0%, transparent 55%),
+    linear-gradient(135deg, #f0f7ff 0%, #e2effe 40%, #d8ecff 75%, #ffffff 100%);
+}
+
+/* Node editor style dot grid */
+.dot-grid-matrix {
+  position: absolute;
+  inset: -100px;
+  background-image: radial-gradient(circle, rgba(59, 130, 246, 0.28) 1.5px, transparent 1.5px);
+  background-size: 28px 28px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Ambient soft gradient depth orbs */
+.ambient-glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.6;
+}
+
+.glow-primary {
+  width: 620px;
+  height: 620px;
+  top: -160px;
+  left: -120px;
+  background: radial-gradient(circle, rgba(147, 197, 253, 0.45) 0%, transparent 70%);
+}
+
+.glow-secondary {
+  width: 660px;
+  height: 660px;
+  bottom: -160px;
+  right: -120px;
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.35) 0%, transparent 70%);
+}

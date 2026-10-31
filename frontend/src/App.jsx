@@ -1,68 +1,79 @@
-import { useState, useRef, useEffect } from 'react';
-import './App.css';
+import { useState, useEffect } from 'react';
+import DotGridCanvas from './components/Canvas/DotGridCanvas';
+import MovableNode from './components/Node/MovableNode';
+import Thread from './components/Thread/Thread';
 
-function App() {
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef({ mouseX: 0, mouseY: 0, posX: 0, posY: 0 });
-  const nodeRef = useRef(null);
+const NODE_WIDTH = 320;
+const NODE_HEIGHT = 200;
 
-  // Center node initially
+export default function App() {
+  const [nodes, setNodes] = useState({
+    node1: { id: 'node1', x: 0, y: 0, width: NODE_WIDTH, height: NODE_HEIGHT },
+    node2: { id: 'node2', x: 0, y: 0, width: NODE_WIDTH, height: NODE_HEIGHT },
+  });
+
+  // Position the two blocks nicely side-by-side on initial mount
   useEffect(() => {
-    const initX = (window.innerWidth - 340) / 2;
-    const initY = (window.innerHeight - 220) / 2;
-    setPosition({ x: initX, y: initY });
+    const screenW = window.innerWidth;
+    const screenH = window.innerHeight;
+
+    const gap = 160;
+    const totalWidth = NODE_WIDTH * 2 + gap;
+    const startX = Math.max((screenW - totalWidth) / 2, 60);
+    const startY = Math.max((screenH - NODE_HEIGHT) / 2, 60);
+
+    setNodes({
+      node1: {
+        id: 'node1',
+        x: startX,
+        y: startY,
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+      },
+      node2: {
+        id: 'node2',
+        x: startX + NODE_WIDTH + gap,
+        y: startY + 30, // slight offset for organic initial look
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+      },
+    });
   }, []);
 
-  const handlePointerDown = (e) => {
-    setIsDragging(true);
-    dragStartRef.current = {
-      mouseX: e.clientX,
-      mouseY: e.clientY,
-      posX: position.x,
-      posY: position.y,
-    };
-    e.target.setPointerCapture?.(e.pointerId);
-  };
-
-  const handlePointerMove = (e) => {
-    if (!isDragging) return;
-    const deltaX = e.clientX - dragStartRef.current.mouseX;
-    const deltaY = e.clientY - dragStartRef.current.mouseY;
-
-    setPosition({
-      x: dragStartRef.current.posX + deltaX,
-      y: dragStartRef.current.posY + deltaY,
-    });
-  };
-
-  const handlePointerUp = (e) => {
-    setIsDragging(false);
-    e.target.releasePointerCapture?.(e.pointerId);
+  const handleNodeMove = (id, newX, newY) => {
+    setNodes((prev) => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        x: newX,
+        y: newY,
+      },
+    }));
   };
 
   return (
-    <div className="app-container">
-      {/* Node-Editor Style Dot Grid */}
-      <div className="dot-grid-canvas" />
+    <DotGridCanvas>
+      {/* Dynamic non-fixed connecting thread */}
+      <Thread start={nodes.node1} end={nodes.node2} />
 
-      {/* Soft Ambient Depth Glows */}
-      <div className="ambient-glow glow-primary" />
-      <div className="ambient-glow glow-secondary" />
-
-      {/* Movable Glass Block Node (No Text) */}
-      <div
-        ref={nodeRef}
-        className={`movable-node ${isDragging ? 'dragging' : ''}`}
-        style={{
-          transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
-        }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
+      {/* Two movable glass blocks */}
+      <MovableNode
+        id="node1"
+        x={nodes.node1.x}
+        y={nodes.node1.y}
+        width={nodes.node1.width}
+        height={nodes.node1.height}
+        onMove={handleNodeMove}
       />
-    </div>
+
+      <MovableNode
+        id="node2"
+        x={nodes.node2.x}
+        y={nodes.node2.y}
+        width={nodes.node2.width}
+        height={nodes.node2.height}
+        onMove={handleNodeMove}
+      />
+    </DotGridCanvas>
   );
 }
-
-export default App;

@@ -1,0 +1,53 @@
+.thread-svg-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+  overflow: visible;
+}
+
+.thread-glow {
+  fill: none;
+  stroke: rgba(96, 165, 250, 0.25);
+  stroke-width: 6px;
+  stroke-linecap: round;
+  filter: blur(4px);
+}
+
+.thread-core {
+  fill: none;
+  stroke: url(#thread-gradient);
+  stroke-width: 2.5px;
+  stroke-linecap: round;
+  transition: stroke 0.2s ease;
+}
+
+.thread-flow {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+  stroke-dasharray: 6 18;
+  animation: threadFlowAnim 2.5s linear infinite;
+}
+
+.thread-port-glow {
+  fill: #60a5fa;
+  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.8));
+}
+
+.thread-port-core {
+  fill: #ffffff;
+}
+
+@keyframes threadFlowAnim {
+  from {
+    stroke-dashoffset: 48;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
