@@ -54,12 +54,10 @@
 /* Middle box: the moving visible viewport area */
 .minimap-viewfinder {
   position: absolute;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1.5px solid rgba(203, 213, 225, 0.9);
-  box-shadow: 
-    0 4px 14px rgba(0, 0, 0, 0.06),
-    inset 0 1px 1px #ffffff;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-radius: 6px;
   pointer-events: none;
   will-change: transform, width, height;
 }

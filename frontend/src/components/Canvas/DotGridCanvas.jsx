@@ -13,10 +13,12 @@ export default function DotGridCanvas({ camera, onCameraChange, children }) {
 
     const handleWheel = (e) => {
       e.preventDefault();
-      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+      // Gentle proportional zoom factor (smooth on trackpads and mouse wheels)
+      const clampedDelta = Math.min(Math.max(-e.deltaY, -40), 40);
+      const zoomFactor = 1 + clampedDelta * 0.0018;
 
       const newZoom = Math.min(Math.max(camera.zoom * zoomFactor, 0.3), 2.5);
-      if (newZoom === camera.zoom) return;
+      if (Math.abs(newZoom - camera.zoom) < 0.001) return;
 
       const rect = el.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
