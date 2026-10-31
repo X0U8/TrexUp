@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trex Up — Simulation Canvas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: linear-gradient(135deg, #090a0f 0%, #111422 40%, #0d121d 70%, #08090d 100%);
+      color: #e2e8f0;
+      position: relative;
+    }
+
+    /* Soft ambient gradient orbs */
+    .ambient-glow {
+      position: absolute;
+      width: 650px;
+      height: 650px;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.22;
+      pointer-events: none;
+      z-index: 1;
+      animation: drift 18s ease-in-out infinite alternate;
+    }
+
+    .glow-1 {
+      top: -150px;
+      left: -100px;
+      background: radial-gradient(circle, #6366f1 0%, transparent 70%);
+    }
+
+    .glow-2 {
+      bottom: -150px;
+      right: -100px;
+      background: radial-gradient(circle, #38bdf8 0%, transparent 70%);
+      animation-delay: -9s;
+    }
+
+    .glow-3 {
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, #818cf8 0%, transparent 70%);
+      opacity: 0.12;
+    }
+
+    @keyframes drift {
+      0% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(60px, 40px) scale(1.08); }
+      100% { transform: translate(-40px, 70px) scale(0.95); }
+    }
+
+    /* Simulation Canvas */
+    #simulation-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      display: block;
+    }
+
+    /* Main Container */
+    .viewport {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    /* Floating Block */
+    .floating-block {
+      pointer-events: auto;
+      width: 380px;
+      height: 240px;
+      background: rgba(18, 22, 34, 0.45);
+      backdrop-filter: blur(28px) saturate(160%);
+      -webkit-backdrop-filter: blur(28px) saturate(160%);
+      border-radius: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 
+        0 20px 50px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(255, 255, 255, 0.04),
+        inset 0 1px 1px rgba(255, 255, 255, 0.15),
+        inset 0 -1px 1px rgba(0, 0, 0, 0.2);
+      animation: float 7s ease-in-out infinite;
+      transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease;
+      cursor: grab;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 28px;
+    }
+
+    .floating-block:hover {
+      box-shadow: 
+        0 30px 65px rgba(0, 0, 0, 0.5),
+        0 0 40px rgba(99, 102, 241, 0.15),
+        inset 0 1px 2px rgba(255, 255, 255, 0.25);
+    }
+
+    .floating-block:active {
+      cursor: grabbing;
+    }
+
+    /* Glass highlight reflection */
+    .floating-block::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 60%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, transparent 100%);
+      pointer-events: none;
+      border-radius: 24px 24px 0 0;
+    }
+
+    /* Floating Keyframe */
+    @keyframes float {
+      0%, 100% {
+        transform: translateY(0px) rotate(0deg);
+      }
+      50% {
+        transform: translateY(-16px) rotate(0.4deg);
+      }
+    }
+
+    /* Minimal Block Interior Details */
+    .block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 12px #10b981;
+      animation: pulse 3s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.8; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.9); }
+    }
+
+    .brand-mark {
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(226, 232, 240, 0.5);
+    }
+
+    .block-core {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .block-title {
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      color: #f8fafc;
+    }
+
+    .block-desc {
+      font-size: 13px;
+      font-weight: 400;
+      color: rgba(148, 163, 184, 0.7);
+      line-height: 1.4;
+    }
+
+    .block-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 14px;
+    }
+
+    .coord-tag {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+      font-size: 11px;
+      color: rgba(148, 163, 184, 0.5);
+      letter-spacing: 0.04em;
+    }
+
+    .mode-pill {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 10px;
+      border-radius: 12px;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      color: #a5b4fc;
+      letter-spacing: 0.02em;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Soft Ambient Glow Orbs -->
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+  <div class="ambient-glow glow-3"></div>
+
+  <!-- Interactive Simulation Canvas -->
+  <canvas id="simulation-canvas"></canvas>
+
+  <!-- Viewport Floating Element -->
+  <div class="viewport">
+    <div class="floating-block" id="interactive-block">
+      <div class="block-header">
+        <span class="brand-mark">Trex Up</span>
+        <div class="status-dot"></div>
+      </div>
+      
+      <div class="block-core">
+        <div class="block-title">Simulation Node</div>
+        <div class="block-desc">Continuous state observer and coordinate matrix.</div>
+      </div>
+
+      <div class="block-footer">
+        <span class="coord-tag" id="coord-display">X: 0.00 · Y: 0.00</span>
+        <span class="mode-pill">Active</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('simulation-canvas');
+    const ctx = canvas.getContext('2d');
+    const block = document.getElementById('interactive-block');
+    const coordDisplay = document.getElementById('coord-display');
+
+    let width, height;
+    let particles = [];
+    const particleCount = 75;
+    const connectionDistance = 120;
+    let mouse = { x: null, y: null, radius: 150 };
+
+    function resize() {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+      initParticles();
+    }
+
+    class Particle {
+      constructor() {
+        this.x = Math.random() * width;
+        this.y = Math.random() * height;
+        this.vx = (Math.random() - 0.5) * 0.45;
+        this.vy = (Math.random() - 0.5) * 0.45;
+        this.radius = Math.random() * 1.6 + 0.8;
+        this.baseAlpha = Math.random() * 0.35 + 0.15;
+      }
+
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+
+        if (this.x < 0) this.x = width;
+        if (this.x > width) this.x = 0;
+        if (this.y < 0) this.y = height;
+        if (this.y > height) this.y = 0;
+
+        // Subtle mouse repulsion/interaction
+        if (mouse.x !== null) {
+          const dx = mouse.x - this.x;
+          const dy = mouse.y - this.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < mouse.radius) {
+            const force = (mouse.radius - dist) / mouse.radius;
+            const angle = Math.atan2(dy, dx);
+            this.x -= Math.cos(angle) * force * 1.5;
+            this.y -= Math.sin(angle) * force * 1.5;
+          }
+        }
+      }
+
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(165, 180, 252, ${this.baseAlpha})`;
+        ctx.fill();
+      }
+    }
+
+    function initParticles() {
+      particles = [];
+      const count = Math.floor((width * height) / 14000);
+      for (let i = 0; i < count; i++) {
+        particles.push(new Particle());
+      }
+    }
+
+    function animate() {
+      ctx.clearRect(0, 0, width, height);
+
+      // Connect nearby particles with subtle simulation lines
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.hypot(dx, dy);
+
+          if (dist < connectionDistance) {
+            const alpha = (1 - dist / connectionDistance) * 0.12;
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = `rgba(129, 140, 248, ${alpha})`;
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+          }
+        }
+      }
+
+      particles.forEach(p => {
+        p.update();
+        p.draw();
+      });
+
+      requestAnimationFrame(animate);
+    }
+
+    window.addEventListener('resize', resize);
+    window.addEventListener('mousemove', (e) => {
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+
+      // Coordinate telemetry update
+      const normX = ((e.clientX / width) * 2 - 1).toFixed(2);
+      const normY = (-(e.clientY / height) * 2 + 1).toFixed(2);
+      coordDisplay.textContent = `X: ${normX} · Y: ${normY}`;
+    });
+
+    window.addEventListener('mouseleave', () => {
+      mouse.x = null;
+      mouse.y = null;
+    });
+
+    // Subtle 3D tilt tracking for the floating block
+    document.addEventListener('mousemove', (e) => {
+      const rect = block.getBoundingClientRect();
+      const blockCenterX = rect.left + rect.width / 2;
+      const blockCenterY = rect.top + rect.height / 2;
+      
+      const deltaX = (e.clientX - blockCenterX) / (width / 2);
+      const deltaY = (e.clientY - blockCenterY) / (height / 2);
+      
+      const tiltX = -deltaY * 8;
+      const tiltY = deltaX * 8;
+
+      block.style.transform = `perspective(1000px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) translateY(-10px)`;
+    });
+
+    resize();
+    animate();
+  </script>
+</body>
+</html>
