@@ -3,6 +3,7 @@ import DotGridCanvas from './components/Canvas/DotGridCanvas';
 import MovableNode from './components/Node/MovableNode';
 import Thread from './components/Thread/Thread';
 import Minimap from './components/Minimap/Minimap';
+import ZoomControls from './components/Controls/ZoomControls';
 
 const NODE_WIDTH = 320;
 const NODE_HEIGHT = 200;
@@ -74,6 +75,14 @@ export default function App() {
       {/* Top-Right Expandable Interactive Minimap */}
       <Minimap
         nodes={nodes}
+        camera={camera}
+        viewportWidth={viewport.width}
+        viewportHeight={viewport.height}
+        onCameraChange={setCamera}
+      />
+
+      {/* Bottom-Left Zoom Controls (+ / -) */}
+      <ZoomControls
         camera={camera}
         viewportWidth={viewport.width}
         viewportHeight={viewport.height}
