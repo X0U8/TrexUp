@@ -1,63 +1,100 @@
 .movable-node {
   position: absolute;
   z-index: 10;
-  background: rgba(255, 255, 255, 0.55);
-  backdrop-filter: blur(32px) saturate(190%);
-  -webkit-backdrop-filter: blur(32px) saturate(190%);
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 
-    0 24px 50px -12px rgba(37, 99, 235, 0.15),
-    0 12px 28px -10px rgba(0, 0, 0, 0.05),
-    inset 0 1px 2px rgba(255, 255, 255, 0.95),
-    inset 0 -1px 2px rgba(59, 130, 246, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
-  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
   overflow: hidden;
+  height: auto;
 }
 
 .movable-node.dragging {
   cursor: grabbing;
   z-index: 20;
-  box-shadow: 
-    0 40px 80px -15px rgba(37, 99, 235, 0.28),
-    0 20px 35px -10px rgba(0, 0, 0, 0.08),
-    inset 0 1px 2px rgba(255, 255, 255, 1);
-  border-color: rgba(147, 197, 253, 0.95);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.15);
+  border-color: #93c5fd;
 }
 
 .movable-node:hover:not(.dragging) {
-  box-shadow: 
-    0 32px 65px -14px rgba(37, 99, 235, 0.22),
-    0 16px 32px -10px rgba(0, 0, 0, 0.06),
-    inset 0 1px 2px rgba(255, 255, 255, 1);
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
 }
 
-/* Glass specular sheen */
-.movable-node::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 50%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.65) 0%, transparent 100%);
-  pointer-events: none;
-  border-radius: 20px 20px 0 0;
+.node-content {
+  position: relative;
+  z-index: 2;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-/* Inner luminous soft light */
-.movable-node::after {
-  content: '';
-  position: absolute;
-  bottom: -20px;
-  right: -20px;
-  width: 100px;
-  height: 100px;
-  background: radial-gradient(circle, rgba(147, 197, 253, 0.4) 0%, transparent 70%);
-  filter: blur(18px);
-  pointer-events: none;
+.node-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.node-file-icon {
+  width: 17px;
+  height: 17px;
+  color: #2563eb;
+  flex-shrink: 0;
+}
+
+.node-filename {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* Small Circular Loading Animation on the Right */
+.node-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(37, 99, 235, 0.2);
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: nodeSpin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes nodeSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.node-status-row {
+  display: flex;
+  align-items: center;
+}
+
+.node-status-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+  text-transform: capitalize;
+}
+
+.node-status-badge.uploading {
+  background: #eff6ff;
+  color: #2563eb;
+  border-color: #bfdbfe;
 }

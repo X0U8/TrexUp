@@ -67,3 +67,22 @@
 .world-layer > * {
   pointer-events: auto;
 }
+
+/* Drag and drop direct file overlay */
+.canvas-drop-overlay {
+  position: absolute;
+  inset: 16px;
+  border: 2px dashed #93c5fd;
+  border-radius: 14px;
+  background: rgba(239, 246, 255, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-size: 15px;
+  font-weight: 500;
+  color: #2563eb;
+}
+

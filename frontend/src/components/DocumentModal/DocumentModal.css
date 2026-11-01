@@ -1,0 +1,134 @@
+.doc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.doc-modal-box {
+  width: 100%;
+  max-width: 440px;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.doc-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 12px;
+  gap: 12px;
+}
+
+/* Document Title View (clickable to edit) */
+.doc-modal-title-view {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  max-width: 340px;
+  transition: background 0.15s ease;
+}
+
+.doc-modal-title-view:hover {
+  background: #f1f5f9;
+}
+
+.doc-title-base {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-title-ext {
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.doc-title-edit-hint {
+  width: 14px;
+  height: 14px;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+/* Document Title Edit Mode */
+.title-edit-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  max-width: 340px;
+}
+
+.title-edit-input {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  padding: 4px 8px;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  outline: none;
+  background: #ffffff;
+  min-width: 80px;
+}
+
+.title-ext-locked {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.doc-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.doc-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.doc-info-label {
+  color: #64748b;
+}
+
+.doc-info-val {
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.doc-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}

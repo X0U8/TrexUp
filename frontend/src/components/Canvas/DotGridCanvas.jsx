@@ -1,8 +1,9 @@
 import { useRef, useState, useEffect } from 'react';
 import './DotGridCanvas.css';
 
-export default function DotGridCanvas({ camera, onCameraChange, children }) {
+export default function DotGridCanvas({ camera, onCameraChange, onDropFile, children }) {
   const [isPanning, setIsPanning] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const panStartRef = useRef({ mouseX: 0, mouseY: 0, camX: 0, camY: 0 });
   const viewportRef = useRef(null);
 
@@ -13,7 +14,6 @@ export default function DotGridCanvas({ camera, onCameraChange, children }) {
 
     const handleWheel = (e) => {
       e.preventDefault();
-      // Gentle proportional zoom factor (smooth on trackpads and mouse wheels)
       const clampedDelta = Math.min(Math.max(-e.deltaY, -40), 40);
       const zoomFactor = 1 + clampedDelta * 0.0018;
 
@@ -24,7 +24,6 @@ export default function DotGridCanvas({ camera, onCameraChange, children }) {
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      // Maintain focal point under mouse cursor
       const newX = mouseX - (mouseX - camera.x) * (newZoom / camera.zoom);
       const newY = mouseY - (mouseY - camera.y) * (newZoom / camera.zoom);
 
@@ -36,13 +35,14 @@ export default function DotGridCanvas({ camera, onCameraChange, children }) {
   }, [camera, onCameraChange]);
 
   const handlePointerDown = (e) => {
-    // Only pan if clicking on canvas background directly, not on UI docks or nodes
     if (
       e.target.closest('.movable-node') ||
       e.target.closest('.minimap-container') ||
-      e.target.closest('.bottom-left-dock') ||
-      e.target.closest('.sidebar-container') ||
-      e.target.closest('.upload-modal-container')
+      e.target.closest('.zoom-controls') ||
+      e.target.closest('.hamburger-btn') ||
+      e.target.closest('.drawer-panel') ||
+      e.target.closest('.drawer-backdrop') ||
+      e.target.closest('.doc-modal-backdrop')
     ) {
       return;
     }
@@ -74,6 +74,35 @@ export default function DotGridCanvas({ camera, onCameraChange, children }) {
     e.currentTarget.releasePointerCapture?.(e.pointerId);
   };
 
+  // Direct file drag and drop on canvas
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0 && onDropFile && viewportRef.current) {
+      const rect = viewportRef.current.getBoundingClientRect();
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+      // Convert to world space
+      const worldX = (screenX - camera.x) / camera.zoom - 140;
+      const worldY = (screenY - camera.y) / camera.zoom - 45;
+
+      for (let i = 0; i < files.length; i++) {
+        onDropFile(files[i], { x: worldX + i * 24, y: worldY + i * 24 });
+      }
+    }
+  };
+
   const gridStep = 28 * camera.zoom;
 
   return (
@@ -83,8 +112,18 @@ export default function DotGridCanvas({ camera, onCameraChange, children }) {
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
-      {/* Dynamic dot grid scaling and shifting with camera */}
+      {/* Drop overlay prompt when user drags file directly over canvas */}
+      {isDragOver && (
+        <div className="canvas-drop-overlay">
+          Drop file to add node
+        </div>
+      )}
+
+      {/* Dynamic dot grid */}
       <div
         className="dot-grid-matrix"
         style={{
@@ -97,7 +136,7 @@ export default function DotGridCanvas({ camera, onCameraChange, children }) {
       <div className="ambient-glow glow-primary" />
       <div className="ambient-glow glow-secondary" />
 
-      {/* Transformed World Layer */}
+      {/* World Layer */}
       <div
         className="world-layer"
         style={{

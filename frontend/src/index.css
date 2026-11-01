@@ -14,5 +14,43 @@ html, body, #root {
 }
 
 body {
+  font-family: 'Source Serif 4', Georgia, serif;
   background: linear-gradient(135deg, #f5f9ff 0%, #e8f2fe 30%, #dbeafe 65%, #ffffff 100%);
+  color: #1e293b;
+  -webkit-font-smoothing: antialiased;
 }
+
+button, input {
+  font-family: inherit;
+}
+
+/* App Toast / Notification */
+.app-toast {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 150;
+  background: #ffffff;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+  padding: 10px 16px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-toast button {
+  border: none;
+  background: transparent;
+  color: #991b1b;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
