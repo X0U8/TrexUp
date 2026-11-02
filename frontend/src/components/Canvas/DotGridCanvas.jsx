@@ -1,7 +1,16 @@
 import { useRef, useState, useEffect } from 'react';
 import './DotGridCanvas.css';
 
-export default function DotGridCanvas({ camera, onCameraChange, onDropFile, children }) {
+export default function DotGridCanvas({
+  camera,
+  onCameraChange,
+  onDropFile,
+  onDropModel,
+  onCanvasPointerMove,
+  onCanvasPointerUp,
+  onCanvasClick,
+  children,
+}) {
   const [isPanning, setIsPanning] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const panStartRef = useRef({ mouseX: 0, mouseY: 0, camX: 0, camY: 0 });
@@ -40,9 +49,18 @@ export default function DotGridCanvas({ camera, onCameraChange, onDropFile, chil
       e.target.closest('.minimap-container') ||
       e.target.closest('.zoom-controls') ||
       e.target.closest('.hamburger-btn') ||
+      e.target.closest('.top-nav-bar') ||
       e.target.closest('.drawer-panel') ||
       e.target.closest('.drawer-backdrop') ||
-      e.target.closest('.doc-modal-backdrop')
+      e.target.closest('.top-breadcrumbs-nav') ||
+      e.target.closest('.doc-modal-backdrop') ||
+      e.target.closest('.model-chat-panel') ||
+      e.target.closest('.workflow-node') ||
+      e.target.closest('.wf-io-backdrop') ||
+      e.target.closest('.agent-modal-backdrop') ||
+      e.target.closest('.thread-interactive-hit') ||
+      e.target.closest('.thread-delete-pill') ||
+      e.target.closest('.thread-hit-path')
     ) {
       return;
     }
@@ -58,6 +76,7 @@ export default function DotGridCanvas({ camera, onCameraChange, onDropFile, chil
   };
 
   const handlePointerMove = (e) => {
+    onCanvasPointerMove?.(e);
     if (!isPanning) return;
     const deltaX = e.clientX - panStartRef.current.mouseX;
     const deltaY = e.clientY - panStartRef.current.mouseY;
@@ -70,6 +89,15 @@ export default function DotGridCanvas({ camera, onCameraChange, onDropFile, chil
   };
 
   const handlePointerUp = (e) => {
+    onCanvasPointerUp?.(e);
+    if (isPanning) {
+      const dist = Math.hypot(e.clientX - panStartRef.current.mouseX, e.clientY - panStartRef.current.mouseY);
+      if (dist < 5) {
+        onCanvasClick?.(e);
+      }
+    } else {
+      onCanvasClick?.(e);
+    }
     setIsPanning(false);
     e.currentTarget.releasePointerCapture?.(e.pointerId);
   };
@@ -77,6 +105,7 @@ export default function DotGridCanvas({ camera, onCameraChange, onDropFile, chil
   // Direct file drag and drop on canvas
   const handleDragOver = (e) => {
     e.preventDefault();
+    if (!onDropFile && !onDropModel) return;
     setIsDragOver(true);
   };
 
@@ -88,6 +117,26 @@ export default function DotGridCanvas({ camera, onCameraChange, onDropFile, chil
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragOver(false);
+
+    // Check if dragging model from ModelsPanel onto canvas
+    const rawData = e.dataTransfer.getData('application/json');
+    if (rawData && onDropModel && viewportRef.current) {
+      try {
+        const parsed = JSON.parse(rawData);
+        if (parsed?.type === 'workflow-model' && parsed.model) {
+          const rect = viewportRef.current.getBoundingClientRect();
+          const screenX = e.clientX - rect.left;
+          const screenY = e.clientY - rect.top;
+          const worldX = (screenX - camera.x) / camera.zoom - 85;
+          const worldY = (screenY - camera.y) / camera.zoom - 28;
+          onDropModel(parsed.model, { x: worldX, y: worldY });
+          return;
+        }
+      } catch (err) {
+        // ignore
+      }
+    }
+
     const files = e.dataTransfer.files;
     if (files && files.length > 0 && onDropFile && viewportRef.current) {
       const rect = viewportRef.current.getBoundingClientRect();

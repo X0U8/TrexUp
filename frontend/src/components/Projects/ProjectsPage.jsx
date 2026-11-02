@@ -1,29 +1,50 @@
 import { useState, useEffect } from 'react';
 import './ProjectsPage.css';
 import NewProjectModal from './NewProjectModal';
-import { getAllProjects, saveProject } from '../../utils/db';
+import { getProjectsMetadata, updateProjectMeta } from '../../utils/db';
 
-function formatTimeAgo(dateString) {
-  if (!dateString) return 'just now';
-  const now = Date.now();
-  const past = new Date(dateString).getTime();
-  const diffSec = Math.max(0, Math.floor((now - past) / 1000));
+function formatCreationDate(dateString) {
+  if (!dateString) return 'Created recently';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return 'Created recently';
 
-  if (diffSec < 60) return 'just now';
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-  return `${Math.floor(diffSec / 86400)}d ago`;
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+  if (isToday) {
+    const diffSec = Math.max(0, Math.floor((now.getTime() - date.getTime()) / 1000));
+    if (diffSec < 60) return 'Created just now';
+    return `Created today, ${timeStr}`;
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) {
+    return `Created yesterday, ${timeStr}`;
+  }
+
+  const isCurrentYear = date.getFullYear() === now.getFullYear();
+  const dateStr = date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: isCurrentYear ? undefined : 'numeric',
+  });
+
+  return `Created ${dateStr}`;
 }
 
 export default function ProjectsPage({ onSelectProject }) {
   const [projects, setProjects] = useState([]);
+  const [loadingProjectId, setLoadingProjectId] = useState(null);
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchActive, setIsSearchActive] = useState(false);
 
   const loadProjects = async () => {
     try {
-      const list = await getAllProjects();
+      // Lightweight fetch: metadata only, never loads bulky node trees into memory
+      const list = await getProjectsMetadata();
       setProjects(list);
     } catch (err) {
       console.error('Failed to load projects from IndexedDB:', err);
@@ -39,16 +60,24 @@ export default function ProjectsPage({ onSelectProject }) {
     onSelectProject?.(newProject);
   };
 
+  const handleSelectCard = async (project) => {
+    if (loadingProjectId) return;
+    setLoadingProjectId(project.id);
+    try {
+      await onSelectProject?.(project);
+    } catch (err) {
+      console.error('Failed to select project:', err);
+      setLoadingProjectId(null);
+    }
+  };
+
   const handleTogglePin = async (e, project) => {
     e.stopPropagation();
-    const updated = {
-      ...project,
-      pinned: !project.pinned,
-    };
+    const nextPinned = !project.pinned;
     try {
-      await saveProject(updated);
+      await updateProjectMeta(project.id, { pinned: nextPinned });
       setProjects((prev) =>
-        prev.map((p) => (p.id === project.id ? updated : p))
+        prev.map((p) => (p.id === project.id ? { ...p, pinned: nextPinned } : p))
       );
     } catch (err) {
       console.error('Failed to toggle pin:', err);
@@ -58,7 +87,9 @@ export default function ProjectsPage({ onSelectProject }) {
   const sortedProjects = [...projects].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
-    return new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt);
+    const timeA = new Date(a.createdAt || a.updatedAt || 0).getTime();
+    const timeB = new Date(b.createdAt || b.updatedAt || 0).getTime();
+    return timeB - timeA;
   });
 
   const filteredProjects = sortedProjects.filter((p) =>
@@ -144,30 +175,35 @@ export default function ProjectsPage({ onSelectProject }) {
             {filteredProjects.map((p) => (
               <div
                 key={p.id}
-                className="project-card"
-                onClick={() => onSelectProject?.(p)}
+                className={`project-card ${loadingProjectId === p.id ? 'is-loading' : ''}`}
+                onClick={() => handleSelectCard(p)}
                 title={p.name}
               >
-                {/* Left Stack Icon Container */}
+                {/* Left Project Icon Container (matching reference image) */}
                 <div className="project-card-icon-box" aria-hidden="true">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M4 6c0 1.657 3.582 3 8 3s8-1.343 8-3-3.582-3-8-3-8 1.343-8 3z" />
-                    <path d="M4 6v6c0 1.657 3.582 3 8 3s8-1.343 8-3V6" />
-                    <path d="M4 12v6c0 1.657 3.582 3 8 3s8-1.343 8-3v-6" />
-                  </svg>
+                  {loadingProjectId === p.id ? (
+                    <div className="project-card-spinner" />
+                  ) : (
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M 9.5 5.5 h 5" />
+                      <path d="M 7 9 h 10" />
+                      <path d="M 6.5 12.5 h 11 l -1.2 6.5 c -0.2 1 -1.1 1.8 -2.1 1.8 h -4.4 c -1 0 -1.9 -0.8 -2.1 -1.8 Z" />
+                    </svg>
+                  )}
                 </div>
 
                 {/* Middle Project Details */}
                 <div className="project-card-info">
                   <span className="project-card-name">{p.name}</span>
                   <span className="project-card-time">
-                    {formatTimeAgo(p.updatedAt || p.createdAt)}
+                    {formatCreationDate(p.createdAt || p.updatedAt)}
                   </span>
                 </div>
 

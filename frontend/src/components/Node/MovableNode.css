@@ -1,31 +1,24 @@
 .movable-node {
   position: absolute;
   z-index: 10;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.76);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.95);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-left: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
-  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  transition: 
+    border-color 0.2s ease,
+    border-left 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
   overflow: hidden;
   height: auto;
-}
-
-.movable-node.dragging {
-  cursor: grabbing;
-  z-index: 20;
-  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.15);
-  border-color: #93c5fd;
-}
-
-.movable-node:hover:not(.dragging) {
-  border-color: #cbd5e1;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
 }
 
 .node-content {
@@ -34,25 +27,19 @@
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
 }
 
 .node-title-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-}
-
-.node-file-icon {
-  width: 17px;
-  height: 17px;
-  color: #2563eb;
-  flex-shrink: 0;
 }
 
 .node-filename {
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: 400;
   color: #1e293b;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -62,8 +49,8 @@
 
 /* Small Circular Loading Animation on the Right */
 .node-spinner {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   border: 2px solid rgba(37, 99, 235, 0.2);
   border-top-color: #2563eb;
   border-radius: 50%;
@@ -77,24 +64,163 @@
   }
 }
 
-.node-status-row {
+.node-badges-row {
   display: flex;
   align-items: center;
+  gap: 6px;
+}
+
+/* Neutral idle state: No color */
+.node-category-tag {
+  font-size: 10px;
+  font-weight: 450;
+  padding: 1.5px 6px;
+  border-radius: 4px;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s ease;
 }
 
 .node-status-badge {
   font-size: 11px;
-  font-weight: 500;
-  padding: 2px 7px;
-  border-radius: 5px;
-  background: #f1f5f9;
-  color: #64748b;
-  border: 1px solid #e2e8f0;
+  font-weight: 400;
+  padding: 1.5px 6px;
+  border-radius: 4px;
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid transparent;
   text-transform: capitalize;
+  transition: all 0.2s ease;
 }
 
 .node-status-badge.uploading {
   background: #eff6ff;
   color: #2563eb;
   border-color: #bfdbfe;
+}
+
+/* --- Hover & Dragging: Colors Reveal Dynamically --- */
+.movable-node:hover:not(.dragging) {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.movable-node.dragging {
+  cursor: grabbing;
+  z-index: 25;
+}
+
+/* Resource Node Hover */
+.movable-node.resource-node:hover,
+.movable-node.resource-node.dragging {
+  border-left: 3px solid #2563eb;
+  border-color: #bfdbfe;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12);
+}
+
+.movable-node.resource-node:hover .node-category-tag.resource,
+.movable-node.resource-node.dragging .node-category-tag.resource {
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.25);
+}
+
+/* Finding Node Hover */
+.movable-node.type-finding:hover,
+.movable-node.type-finding.dragging {
+  border-left: 3px solid #d97706;
+  border-color: #fde68a;
+  box-shadow: 0 8px 24px rgba(217, 119, 6, 0.12);
+}
+
+.movable-node.type-finding:hover .node-category-tag.info.finding,
+.movable-node.type-finding.dragging .node-category-tag.info.finding {
+  background: rgba(217, 119, 6, 0.08);
+  color: #d97706;
+  border-color: rgba(217, 119, 6, 0.25);
+}
+
+/* Hypothesis Node Hover */
+.movable-node.type-hypothesis:hover,
+.movable-node.type-hypothesis.dragging {
+  border-left: 3px solid #7c3aed;
+  border-color: #ddd6fe;
+  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.12);
+}
+
+.movable-node.type-hypothesis:hover .node-category-tag.info.hypothesis,
+.movable-node.type-hypothesis.dragging .node-category-tag.info.hypothesis {
+  background: rgba(124, 58, 237, 0.08);
+  color: #7c3aed;
+  border-color: rgba(124, 58, 237, 0.25);
+}
+
+/* Claim Node Hover */
+.movable-node.type-claim:hover,
+.movable-node.type-claim.dragging {
+  border-left: 3px solid #db2777;
+  border-color: #fbcfe8;
+  box-shadow: 0 8px 24px rgba(219, 39, 119, 0.12);
+}
+
+.movable-node.type-claim:hover .node-category-tag.info.claim,
+.movable-node.type-claim.dragging .node-category-tag.info.claim {
+  background: rgba(219, 39, 119, 0.08);
+  color: #db2777;
+  border-color: rgba(219, 39, 119, 0.25);
+}
+
+/* Evidence Node Hover */
+.movable-node.type-evidence:hover,
+.movable-node.type-evidence.dragging {
+  border-left: 3px solid #059669;
+  border-color: #a7f3d0;
+  box-shadow: 0 8px 24px rgba(5, 150, 105, 0.12);
+}
+
+.movable-node.type-evidence:hover .node-category-tag.info.evidence,
+.movable-node.type-evidence.dragging .node-category-tag.info.evidence {
+  background: rgba(5, 150, 105, 0.08);
+  color: #059669;
+  border-color: rgba(5, 150, 105, 0.25);
+}
+
+/* Open Question Node Hover */
+.movable-node.type-open_question:hover,
+.movable-node.type-open_question.dragging {
+  border-left: 3px solid #4f46e5;
+  border-color: #c7d2fe;
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.12);
+}
+
+.movable-node.type-open_question:hover .node-category-tag.info.open_question,
+.movable-node.type-open_question.dragging .node-category-tag.info.open_question {
+  background: rgba(79, 70, 229, 0.08);
+  color: #4f46e5;
+  border-color: rgba(79, 70, 229, 0.25);
+}
+
+/* Topic Node Hover */
+.movable-node.type-topic:hover,
+.movable-node.type-topic.dragging,
+.movable-node.type-subtopic:hover,
+.movable-node.type-subtopic.dragging {
+  border-left: 3px solid #475569;
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 24px rgba(71, 85, 105, 0.12);
+}
+
+.movable-node.type-topic:hover .node-category-tag.info.topic,
+.movable-node.type-topic.dragging .node-category-tag.info.topic {
+  background: rgba(71, 85, 105, 0.08);
+  color: #475569;
+  border-color: rgba(71, 85, 105, 0.25);
+}
+
+.movable-node:hover .node-status-badge:not(.uploading) {
+  color: #64748b;
+  border-color: #e2e8f0;
+  background: #f8fafc;
 }

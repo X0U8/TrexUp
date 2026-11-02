@@ -1,23 +1,30 @@
 .doc-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 100;
-  background: rgba(0, 0, 0, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  z-index: 55;
+  background: transparent;
+  pointer-events: none;
 }
 
 .doc-modal-box {
-  width: 100%;
-  max-width: 440px;
+  position: absolute;
+  bottom: 24px;
+  left: 76px;
+  width: 330px;
+  max-width: calc(100vw - 120px);
   background: #ffffff;
-  border-radius: 12px;
-  padding: 20px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  gap: 14px;
+  box-shadow: 
+    0 16px 36px -10px rgba(15, 23, 42, 0.12),
+    0 4px 12px -2px rgba(15, 23, 42, 0.05);
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .doc-modal-header {
@@ -25,8 +32,8 @@
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid #f1f5f9;
-  padding-bottom: 12px;
-  gap: 12px;
+  padding-bottom: 10px;
+  gap: 10px;
 }
 
 /* Document Title View (clickable to edit) */
@@ -35,9 +42,9 @@
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 3px 6px;
   border-radius: 6px;
-  max-width: 340px;
+  max-width: 260px;
   transition: background 0.15s ease;
 }
 
@@ -46,8 +53,8 @@
 }
 
 .doc-title-base {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 450;
   color: #1e293b;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -55,15 +62,15 @@
 }
 
 .doc-title-ext {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 400;
   color: #64748b;
   flex-shrink: 0;
 }
 
 .doc-title-edit-hint {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   color: #94a3b8;
   flex-shrink: 0;
 }
@@ -74,39 +81,59 @@
   align-items: center;
   gap: 4px;
   flex: 1;
-  max-width: 340px;
+  max-width: 260px;
 }
 
 .title-edit-input {
   flex: 1;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 400;
   color: #1e293b;
-  padding: 4px 8px;
+  padding: 3px 6px;
   border: 1px solid #3b82f6;
   border-radius: 6px;
   outline: none;
   background: #ffffff;
-  min-width: 80px;
+  min-width: 70px;
 }
 
 .title-ext-locked {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 400;
   color: #64748b;
   background: #f1f5f9;
-  padding: 4px 8px;
+  padding: 3px 6px;
   border-radius: 6px;
   border: 1px solid #e2e8f0;
   user-select: none;
   -webkit-user-select: none;
 }
 
+.doc-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 13px;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.doc-modal-close:hover {
+  background: #f1f5f9;
+  color: #334155;
+}
+
 .doc-modal-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  font-size: 13px;
+  gap: 10px;
+  font-size: 12px;
   color: #475569;
 }
 
@@ -118,17 +145,46 @@
 
 .doc-info-label {
   color: #64748b;
+  font-weight: 400;
 }
 
 .doc-info-val {
-  font-weight: 500;
+  font-weight: 450;
   color: #1e293b;
+}
+
+.node-status-badge {
+  font-size: 11px;
+  font-weight: 400;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: #f1f5f9;
+  color: #64748b;
+  text-transform: capitalize;
 }
 
 .doc-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding-top: 8px;
+  padding-top: 6px;
   border-top: 1px solid #f1f5f9;
+}
+
+.doc-modal-actions .btn-secondary {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 400;
+  transition: all 0.15s ease;
+}
+
+.doc-modal-actions .btn-secondary:hover {
+  background: #f1f5f9;
+  color: #1e293b;
 }

@@ -50,13 +50,21 @@ export default function MovableNode({
     }
   };
 
-  const fileName = data.name || 'Untitled Document';
-  const status = data.status || 'not checked';
+  const isResource =
+    data.category === 'resource' ||
+    data.type === 'document' ||
+    data.type === 'resource' ||
+    Boolean(data.cloudinaryUrl) ||
+    Boolean(data.fileSize);
+
+  const rawType = data.type || (isResource ? 'document' : 'finding');
+  const displayName = (data.title || data.name || (isResource ? 'Untitled Document' : 'Untitled Node')).replace(/\.node$/i, '');
+  const status = data.status || (isResource ? 'not checked' : 'proposed');
   const isUploading = Boolean(data.uploading);
 
   return (
     <div
-      className={`movable-node ${isDragging ? 'dragging' : ''}`}
+      className={`movable-node ${isResource ? 'resource-node' : 'info-node'} type-${rawType} ${isDragging ? 'dragging' : ''}`}
       style={{
         width: `${width}px`,
         transform: `translate3d(${x}px, ${y}px, 0)`,
@@ -64,23 +72,32 @@ export default function MovableNode({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      title={isUploading ? 'Uploading to Cloudinary...' : 'Click to view details'}
+      title={isUploading ? 'Uploading to Cloudinary...' : 'Click to inspect node'}
     >
       <div className="node-content">
         <div className="node-title-row">
-          <svg className="node-file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            <polyline points="14 2 14 8 20 8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="node-filename">{fileName}</span>
-          {/* Small circular loading animation on the right side */}
+          <span className="node-filename">{displayName}</span>
           {isUploading && <div className="node-spinner" title="Uploading..." />}
         </div>
 
-        <div className="node-status-row">
-          <span className={`node-status-badge ${isUploading ? 'uploading' : ''}`}>
-            {isUploading ? 'uploading...' : status}
-          </span>
+        <div className="node-badges-row">
+          {isResource ? (
+            <>
+              <span className="node-category-tag resource">Resource</span>
+              <span className={`node-status-badge ${isUploading ? 'uploading' : ''}`}>
+                {isUploading ? 'uploading...' : status}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className={`node-category-tag info ${rawType}`}>
+                {rawType.replace('_', ' ')}
+              </span>
+              <span className="node-status-badge info">
+                {status}
+              </span>
+            </>
+          )}
         </div>
       </div>
     </div>

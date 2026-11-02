@@ -6,21 +6,35 @@ export default function DocumentModal({ node, isOpen, onClose, onRename }) {
   const [baseName, setBaseName] = useState('');
   const [extension, setExtension] = useState('');
   const inputRef = useRef(null);
+  const modalBoxRef = useRef(null);
 
-  // Split filename into base and locked extension
+  const isResource =
+    node?.category === 'resource' ||
+    node?.type === 'document' ||
+    Boolean(node?.fileSize) ||
+    Boolean(node?.cloudinaryUrl);
+
+  // Split filename into base and locked extension only for real resource files
   useEffect(() => {
-    if (!node?.name) return;
-    const lastDot = node.name.lastIndexOf('.');
-    if (lastDot > 0) {
-      setBaseName(node.name.substring(0, lastDot));
-      setExtension(node.name.substring(lastDot));
+    if (!node) return;
+    const raw = (node.title || node.name || '').replace(/\.node$/i, '');
+    if (isResource) {
+      const lastDot = raw.lastIndexOf('.');
+      if (lastDot > 0) {
+        setBaseName(raw.substring(0, lastDot));
+        setExtension(raw.substring(lastDot));
+      } else {
+        setBaseName(raw);
+        setExtension('');
+      }
     } else {
-      setBaseName(node.name);
+      setBaseName(raw);
       setExtension('');
     }
     setIsEditing(false);
-  }, [node]);
+  }, [node, isResource]);
 
+  // Handle Escape key
   useEffect(() => {
     if (!isOpen) {
       setIsEditing(false);
@@ -40,6 +54,26 @@ export default function DocumentModal({ node, isOpen, onClose, onRename }) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, isEditing, onClose]);
+
+  // Handle click outside to close (without needing a dimmed/blurred backdrop)
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDownOutside = (e) => {
+      if (modalBoxRef.current && !modalBoxRef.current.contains(e.target)) {
+        onClose();
+      }
+    };
+
+    const timer = setTimeout(() => {
+      window.addEventListener('pointerdown', handlePointerDownOutside);
+    }, 60);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('pointerdown', handlePointerDownOutside);
+    };
+  }, [isOpen, onClose]);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -67,11 +101,8 @@ export default function DocumentModal({ node, isOpen, onClose, onRename }) {
   };
 
   return (
-    <div
-      className="doc-modal-backdrop"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="doc-modal-box">
+    <div className="doc-modal-backdrop">
+      <div className="doc-modal-box" ref={modalBoxRef}>
         <div className="doc-modal-header">
           {isEditing ? (
             <div className="title-edit-wrap">
@@ -112,35 +143,59 @@ export default function DocumentModal({ node, isOpen, onClose, onRename }) {
             </div>
           )}
 
-          <button type="button" className="close-btn" onClick={onClose} aria-label="Close">
+          <button
+            type="button"
+            className="doc-modal-close"
+            onClick={onClose}
+            aria-label="Close"
+          >
             ✕
           </button>
         </div>
 
         <div className="doc-modal-body">
           <div className="doc-info-row">
+            <span className="doc-info-label">Category</span>
+            <span className="doc-info-val" style={{ textTransform: 'capitalize' }}>
+              {isResource ? 'Resource (Document)' : `Investigation (${(node.type || 'finding').replace('_', ' ')})`}
+            </span>
+          </div>
+
+          <div className="doc-info-row">
             <span className="doc-info-label">Status</span>
-            <span className="node-status-badge">{node.status || 'not checked'}</span>
+            <span className="node-status-badge">{node.status || (isResource ? 'not checked' : 'proposed')}</span>
           </div>
 
-          <div className="doc-info-row">
-            <span className="doc-info-label">File Size</span>
-            <span className="doc-info-val">{formatSize(node.fileSize)}</span>
-          </div>
+          {isResource && node.fileSize ? (
+            <div className="doc-info-row">
+              <span className="doc-info-label">File Size</span>
+              <span className="doc-info-val">{formatSize(node.fileSize)}</span>
+            </div>
+          ) : null}
+
+          {node.description ? (
+            <div className="doc-info-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '5px' }}>
+              <span className="doc-info-label">Description</span>
+              <span className="doc-info-val" style={{ fontSize: '12px', color: '#475569', lineHeight: 1.45, textAlign: 'left' }}>
+                {node.description}
+              </span>
+            </div>
+          ) : null}
 
           <div className="doc-info-row">
-            <span className="doc-info-label">Document ID</span>
+            <span className="doc-info-label">Node ID</span>
             <span
               className="doc-info-val"
               style={{
                 fontFamily: 'monospace',
-                fontSize: '12px',
+                fontSize: '11px',
                 wordBreak: 'break-all',
-                maxWidth: '220px',
+                maxWidth: '200px',
                 textAlign: 'right',
+                fontWeight: 400,
               }}
             >
-              {node.uploading ? 'Generating...' : node.id}
+              {node.node_id || node.id}
             </span>
           </div>
         </div>
