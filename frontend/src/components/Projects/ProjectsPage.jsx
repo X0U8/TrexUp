@@ -136,26 +136,7 @@ export default function ProjectsPage({ onSelectProject }) {
             </button>
           )}
 
-          {/* Sort / Reorder Icon */}
-          <button
-            type="button"
-            className="icon-btn"
-            title="Sort projects"
-            aria-label="Sort"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="7 9 7 3 4 6" />
-              <polyline points="17 15 17 21 20 18" />
-              <line x1="7" y1="3" x2="7" y2="21" />
-              <line x1="17" y1="3" x2="17" y2="21" />
-            </svg>
-          </button>
+
 
           {/* New Project Header Button */}
           <button
@@ -235,20 +216,41 @@ export default function ProjectsPage({ onSelectProject }) {
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              {/* 4 Square Tiles */}
+              {/* 3 resting tiles */}
               <rect x="28" y="16" width="18" height="18" rx="3.5" />
               <rect x="50" y="16" width="18" height="18" rx="3.5" />
               <rect x="28" y="40" width="18" height="18" rx="3.5" />
-              <rect x="52" y="37" width="18" height="18" rx="3.5" />
 
-              {/* Exact Hand Icon from Reference */}
-              <path d="M 52 74 V 57 a 2.5 2.5 0 0 1 5 0 v 10 M 57 67 V 59 a 2.5 2.5 0 0 1 5 0 v 9 M 62 68 V 61 a 2.5 2.5 0 0 1 5 0 v 8 M 67 69 V 64 a 2.5 2.5 0 0 1 5 0 v 8 c 0 9 -6 16 -14 16 c -7 0 -13 -4 -16 -10 l -6 -6 a 3 3 0 0 1 4.5 -4 l 6.5 5.5 L 52 74" />
+              {/* Tile being grabbed */}
+              <rect x="54" y="37" width="18" height="18" rx="3.5" />
+
+              {/* Hand: one closed outline (thumb, four fingers, palm).
+      The fill hides the tile behind the fingers, so set --icon-bg to your background color. */}
+              <path
+                style={{ fill: "var(--icon-bg, white)" }}
+                d="M 41.9 70.3
+       A 2.5 2.5 0 0 1 46.1 67.7
+       L 53 73.8
+       V 52.5 A 2.5 2.5 0 0 1 58 52.5
+       V 50.5 A 2.5 2.5 0 0 1 63 50.5
+       V 52.5 A 2.5 2.5 0 0 1 68 52.5
+       V 55.5 A 2.5 2.5 0 0 1 73 55.5
+       V 78
+       C 73 85 68 89 63 89
+       C 57 89 52 87 49.9 83.3
+       Z"
+              />
+
+              {/* Finger separators */}
+              <path d="M 58 52.5 V 68" />
+              <path d="M 63 52.5 V 68" />
+              <path d="M 68 55.5 V 68" />
             </svg>
           </div>
 
           <h2 className="empty-state-heading">Looking to start a project?</h2>
           <p className="empty-state-desc">
-            Upload materials, set custom instructions, and organize conversations in one space.
+            Upload materials, run custom engines , workflows , experiments.
           </p>
 
           <button

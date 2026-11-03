@@ -155,8 +155,15 @@ export default function DocumentModal({ node, isOpen, onClose, onRename }) {
 
         <div className="doc-modal-body">
           <div className="doc-info-row">
+            <span className="doc-info-label">Node ID</span>
+            <span className="doc-info-val" style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: '11px', color: '#64748b' }}>
+              {node.id || node.node_id}
+            </span>
+          </div>
+
+          <div className="doc-info-row">
             <span className="doc-info-label">Category</span>
-            <span className="doc-info-val" style={{ textTransform: 'capitalize' }}>
+            <span className="doc-info-val">
               {isResource ? 'Resource (Document)' : `Investigation (${(node.type || 'finding').replace('_', ' ')})`}
             </span>
           </div>
@@ -182,22 +189,6 @@ export default function DocumentModal({ node, isOpen, onClose, onRename }) {
             </div>
           ) : null}
 
-          <div className="doc-info-row">
-            <span className="doc-info-label">Node ID</span>
-            <span
-              className="doc-info-val"
-              style={{
-                fontFamily: 'monospace',
-                fontSize: '11px',
-                wordBreak: 'break-all',
-                maxWidth: '200px',
-                textAlign: 'right',
-                fontWeight: 400,
-              }}
-            >
-              {node.node_id || node.id}
-            </span>
-          </div>
         </div>
 
         <div className="doc-modal-actions">

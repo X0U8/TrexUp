@@ -1,0 +1,305 @@
+.engine-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+  animation: engineFadeIn 0.12s ease-out;
+}
+
+@keyframes engineFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.engine-modal-card {
+  width: 100%;
+  max-width: 580px;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow:
+    0 20px 25px -5px rgba(15, 23, 42, 0.1),
+    0 8px 10px -6px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 22px;
+  gap: 12px;
+  animation: engineCardPop 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes engineCardPop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Header */
+.engine-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.engine-modal-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.engine-modal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.engine-modal-id-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.engine-modal-id-sep {
+  font-size: 10px;
+  color: #cbd5e1;
+  user-select: none;
+}
+
+.engine-modal-subid {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+}
+
+.engine-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  line-height: 1;
+  margin-top: -2px;
+  margin-right: -4px;
+}
+
+.engine-modal-close:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+/* Description (no label) */
+.engine-modal-description {
+  margin: 0;
+  font-size: 12.5px;
+  color: #475569;
+  line-height: 1.45;
+}
+
+/* Input Output with icon, no extra text */
+.engine-modal-io {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 7px 12px;
+  min-height: 38px;
+}
+
+.engine-io-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.engine-io-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #334155;
+  line-height: 1.3;
+}
+
+.engine-io-badge.empty {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  padding: 0;
+}
+
+.engine-io-icon {
+  width: 13px;
+  height: 13px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.engine-io-arrow {
+  width: 14px;
+  height: 14px;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+/* Actions */
+.engine-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 6px;
+  border-top: 1px solid #f1f5f9;
+  margin-top: 2px;
+}
+
+.engine-btn-delete {
+  background: transparent;
+  border: 1px solid #fee2e2;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: #dc2626;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.engine-btn-delete:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+.engine-btn-details {
+  background: #0f172a;
+  border: 1px solid #0f172a;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: #ffffff;
+  padding: 5px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.engine-btn-details:hover {
+  opacity: 0.88;
+}
+
+/* Engine Context Checkboxes */
+.engine-context-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.engine-context-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.engine-context-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.engine-context-hint {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.engine-context-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.engine-context-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.engine-context-box:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.engine-context-box.checked {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.engine-context-box input[type="checkbox"] {
+  accent-color: #3b82f6;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.engine-context-text-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.engine-context-box-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.engine-context-box-sub {
+  font-size: 10px;
+  color: #64748b;
+  line-height: 1.25;
+}
+
+
+

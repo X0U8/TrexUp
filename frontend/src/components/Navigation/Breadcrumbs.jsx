@@ -35,6 +35,10 @@ export default function Breadcrumbs({
         <span className="crumb-active">Documents</span>
       ) : currentView === 'tools' ? (
         <span className="crumb-active">Tools</span>
+      ) : currentView === 'synthesis' ? (
+        <span className="crumb-active">Synthesis</span>
+      ) : currentView === 'logs' ? (
+        <span className="crumb-active">Logs</span>
       ) : currentView === 'engines' ? (
         <>
           <span className="crumb-sub">engine</span>

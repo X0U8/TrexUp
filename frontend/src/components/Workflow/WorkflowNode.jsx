@@ -6,6 +6,7 @@ export default function WorkflowNode({
   title,
   sub,
   type = 'input', // 'input' | 'output' | 'agent'
+  inputSource,
   x,
   y,
   width = 175,
@@ -56,12 +57,13 @@ export default function WorkflowNode({
     }
   };
 
-  const hasLeftPort = type === 'output' || type === 'agent';
-  const hasRightPort = type === 'input' || type === 'agent';
+  const hasLeftPort = type === 'output' || type === 'agent' || type === 'engine';
+  const hasRightPort = type === 'input' || type === 'agent' || type === 'engine';
 
   const getNodeTooltip = () => {
     if (type === 'input') return 'Click to configure workflow input sources';
     if (type === 'agent') return 'Click to configure agent prompt & model';
+    if (type === 'engine') return 'Click to inspect or edit engine code';
     return 'Output';
   };
 
@@ -95,9 +97,14 @@ export default function WorkflowNode({
       <div className="wf-node-content">
         <div className="wf-node-indicator" />
         <div className="wf-node-text-wrap">
-          <span className="wf-node-title">{type === 'output' ? 'Output' : title}</span>
+          <span className="wf-node-title" title={type === 'output' ? 'Output' : title}>
+            {type === 'output' ? 'Output' : title}
+          </span>
           {type !== 'output' && (
-            <span className="wf-node-sub">
+            <span
+              className={`wf-node-sub ${type === 'engine' ? 'engine-sub-desc' : ''}`}
+              title={sub}
+            >
               {sub || (type === 'input' ? 'Workflow input' : 'Agent')}
             </span>
           )}

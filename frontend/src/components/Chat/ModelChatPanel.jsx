@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { NODE_LIFECYCLE_DEFINITIONS } from '../../tools/nodeLifecycleTools';
+import { NODE_LIFECYCLE_DEFINITIONS, NODE_INSTRUCTIONS } from '../../tools/nodeLifecycleTools';
+import { ENGINE_TOOL_DEFINITIONS, ENGINE_INSTRUCTIONS } from '../../tools/engine';
 import { getGlobalChat, saveGlobalChat, clearGlobalChat } from '../../utils/db';
 import MarkdownText from './MarkdownText';
 import './ModelChatPanel.css';
@@ -17,15 +18,24 @@ export default function ModelChatPanel({
   const [inputVal, setInputVal] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [activeToolStatus, setActiveToolStatus] = useState('');
+  const [size, setSize] = useState(() => {
+    return { width: 320, height: 420 };
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartRef = useRef({
+    mouseX: 0,
+    mouseY: 0,
+    startWidth: 0,
+    startHeight: 0,
+    startX: 0,
+    startY: 0,
+    direction: '',
+  });
+
   const [position, setPosition] = useState(() => {
-    const defaultRight = 24;
-    const defaultTop = 176;
-    const defaultWidth = 300;
     const w = typeof window !== 'undefined' ? window.innerWidth : 1200;
-    return {
-      x: Math.max(16, w - defaultWidth - defaultRight),
-      y: defaultTop,
-    };
+    const h = typeof window !== 'undefined' ? window.innerHeight : 800;
+    return { x: Math.max(16, w - 340), y: Math.max(80, h - 480) };
   });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, startX: 0, startY: 0 });
@@ -42,7 +52,7 @@ export default function ModelChatPanel({
   const isLoadedRef = useRef(false);
   const messagesEndRef = useRef(null);
 
-  // Load persisted global chat and position from IndexedDB on mount
+  // Load persisted global chat, size, and position from IndexedDB on mount
   useEffect(() => {
     async function loadChat() {
       try {
@@ -67,6 +77,14 @@ export default function ModelChatPanel({
           if (typeof persisted.isCollapsed === 'boolean') {
             setIsCollapsed(persisted.isCollapsed);
           }
+          if (persisted.size && typeof persisted.size.width === 'number' && typeof persisted.size.height === 'number') {
+            const maxW = Math.max(260, window.innerWidth - 30);
+            const maxH = Math.max(220, window.innerHeight - 60);
+            setSize({
+              width: Math.min(maxW, Math.max(260, persisted.size.width)),
+              height: Math.min(maxH, Math.max(220, persisted.size.height)),
+            });
+          }
           if (persisted.position && typeof persisted.position.x === 'number' && typeof persisted.position.y === 'number') {
             const maxX = Math.max(10, window.innerWidth - 240);
             const maxY = Math.max(10, window.innerHeight - 80);
@@ -85,7 +103,7 @@ export default function ModelChatPanel({
     loadChat();
   }, []);
 
-  // Persist messages, collapsed state, and position whenever they change
+  // Persist messages, collapsed state, size, and position whenever they change
   useEffect(() => {
     if (!isLoadedRef.current) return;
     saveGlobalChat({
@@ -93,8 +111,75 @@ export default function ModelChatPanel({
       selectedModel: FIXED_MODEL_ID,
       isCollapsed,
       position,
+      size,
     });
-  }, [messages, isCollapsed, position]);
+  }, [messages, isCollapsed, position, size]);
+
+  const handleResizeStart = (dir, e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setIsResizing(true);
+    resizeStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      startWidth: size.width,
+      startHeight: size.height,
+      startX: position.x,
+      startY: position.y,
+      direction: dir,
+    };
+
+    const handlePointerMove = (moveEvt) => {
+      const dx = moveEvt.clientX - resizeStartRef.current.mouseX;
+      const dy = moveEvt.clientY - resizeStartRef.current.mouseY;
+      const { startWidth, startHeight, startX, startY, direction } = resizeStartRef.current;
+
+      let newWidth = startWidth;
+      let newHeight = startHeight;
+      let newX = startX;
+      let newY = startY;
+
+      const minW = 260;
+      const maxW = Math.max(minW, window.innerWidth - 40);
+      const minH = 220;
+      const maxH = Math.max(minH, window.innerHeight - 60);
+
+      if (direction.includes('e')) {
+        newWidth = Math.min(maxW, Math.max(minW, startWidth + dx));
+      }
+      if (direction.includes('s')) {
+        newHeight = Math.min(maxH, Math.max(minH, startHeight + dy));
+      }
+      if (direction.includes('w')) {
+        const potentialW = startWidth - dx;
+        if (potentialW >= minW && potentialW <= maxW) {
+          newWidth = potentialW;
+          newX = startX + dx;
+        }
+      }
+      if (direction.includes('n')) {
+        const potentialH = startHeight - dy;
+        if (potentialH >= minH && potentialH <= maxH) {
+          newHeight = potentialH;
+          newY = startY + dy;
+        }
+      }
+
+      setSize({ width: Math.round(newWidth), height: Math.round(newHeight) });
+      if (newX !== startX || newY !== startY) {
+        setPosition({ x: Math.round(newX), y: Math.round(newY) });
+      }
+    };
+
+    const handlePointerUp = () => {
+      setIsResizing(false);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
 
   const handleHeaderPointerDown = (e) => {
     if (e.target.closest('button') || e.target.closest('select') || e.target.closest('input')) {
@@ -115,8 +200,8 @@ export default function ModelChatPanel({
     if (!isDragging) return;
     const deltaX = e.clientX - dragStartRef.current.mouseX;
     const deltaY = e.clientY - dragStartRef.current.mouseY;
-    const panelWidth = isCollapsed ? 240 : 300;
-    const panelHeight = isCollapsed ? 44 : 290;
+    const panelWidth = isCollapsed ? 240 : size.width;
+    const panelHeight = isCollapsed ? 44 : size.height;
 
     const maxX = Math.max(10, window.innerWidth - panelWidth - 10);
     const maxY = Math.max(10, window.innerHeight - panelHeight - 10);
@@ -161,7 +246,7 @@ export default function ModelChatPanel({
     setActiveToolStatus('Connecting to model...');
 
     try {
-      const apiTools = NODE_LIFECYCLE_DEFINITIONS.map((tool) => ({
+      const apiTools = [...NODE_LIFECYCLE_DEFINITIONS, ...ENGINE_TOOL_DEFINITIONS].map((tool) => ({
         type: 'function',
         function: {
           name: tool.name,
@@ -182,17 +267,10 @@ You operate globally across the entire project and all scientific explorations.
 The active exploration canvas in focus is "${currentExploration}".
 When creating, searching, or mutating nodes, provide exploration_id as "${currentExploration}" unless the user explicitly refers to another exploration.
 You can investigate across explorations, connect findings, formulate hypotheses, synthesize evidence, and verify scientific claims across the entire workspace.
-Node types available: finding, hypothesis, claim, evidence, document, topic, subtopic, open_question.
-Relationship types available: supports, refutes, caused_by, related_to, derives_from, evidences, depends_on, contradicts.
 
-CORE RULES:
-1. When asked to create a node, call "create_node" directly.
-2. For existing nodes (update, rename, inspect, delete, verify): NEVER guess node IDs. First call "search_nodes" with query or title to find matching nodes and their node_id.
-3. When asked to connect nodes: call "connect_nodes" with source_node_id, target_node_ids (array), relationship_type, and reasoning description.
-4. To inspect connections around a node, call "get_connections".
-5. To update or remove connections, call "update_connection" or "remove_connection".
-6. When asked to delete all nodes or multiple nodes, call "delete_node" with node_id: "all" or delete_all: true (or pass node_ids array).
-7. Call "list_explorations" when the user asks to see or investigate across available explorations.`;
+${NODE_INSTRUCTIONS}
+
+${ENGINE_INSTRUCTIONS}`;
 
       let conversationMessages = [
         { role: 'system', content: systemPrompt },
@@ -203,7 +281,7 @@ CORE RULES:
       const toolEvents = [];
       let finalReply = '';
       let iteration = 0;
-      const MAX_ITERATIONS = 4;
+      const MAX_ITERATIONS = 8;
 
       while (iteration < MAX_ITERATIONS) {
         iteration++;
@@ -219,6 +297,9 @@ CORE RULES:
             model: selectedModel,
             messages: conversationMessages,
             tools: apiTools,
+            ...(selectedModel?.startsWith('muse-spark') || selectedModel?.startsWith('muse-wonder')
+              ? { reasoning_effort: 'minimal' }
+              : {}),
           }),
         });
 
@@ -261,7 +342,7 @@ CORE RULES:
             args.exploration_id = currentExploration;
           }
 
-          const toolResult = onExecuteTool?.(fnName, args) || {};
+          const toolResult = (await onExecuteTool?.(fnName, args)) || {};
 
           if (toolResult?.searched) {
             const count = toolResult.count || 0;
@@ -281,10 +362,23 @@ CORE RULES:
               nodeId: toolResult.connections?.[0]?.id,
               status: 'success',
             });
-          } else if (toolResult?.created) {
+          } else if (fnName === 'create_nodes' && toolResult?.created) {
+            const count = toolResult.count || toolResult.nodes?.length || 0;
             toolEvents.push({
               toolName: fnName,
-              label: `Created ${toolResult.node.type} node "${toolResult.node.title}"`,
+              label: `Created ${count} nodes in batch`,
+              status: 'success',
+            });
+          } else if (fnName === 'create_engine' && toolResult?.created) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Created engine "${toolResult.engine_id}"`,
+              status: 'success',
+            });
+          } else if (toolResult?.created && toolResult.node) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Created ${toolResult.node.type || 'node'} "${toolResult.node.title || toolResult.node.name || toolResult.node.id}"`,
               nodeId: toolResult.node.id,
               status: 'success',
             });
@@ -331,6 +425,36 @@ CORE RULES:
               toolName: fnName,
               label: `Explorations: ${expNames}`,
               status: 'success',
+            });
+          } else if (toolResult?.listed && fnName === 'list_engines') {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Listed ${toolResult.count} engine${toolResult.count !== 1 ? 's' : ''}`,
+              status: 'success',
+            });
+          } else if (fnName === 'get_engine' && toolResult?.engine) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Read engine "${toolResult.engine.engine_id}"`,
+              status: 'success',
+            });
+          } else if (fnName === 'update_engine' && toolResult?.updated) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Updated engine "${toolResult.engine_id}"`,
+              status: 'success',
+            });
+          } else if (fnName === 'test_engine' && toolResult?.tested && !toolResult?.error) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Tested engine "${toolResult.engine_id}" OK (${toolResult.duration_ms}ms)`,
+              status: 'success',
+            });
+          } else if (fnName === 'test_engine' && toolResult?.error) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Test failed${toolResult.line ? ` at line ${toolResult.line}` : ''}: ${toolResult.error}`,
+              status: 'refused',
             });
           } else if (toolResult?.error) {
             toolEvents.push({
@@ -486,10 +610,12 @@ CORE RULES:
 
   return (
     <div
-      className={`model-chat-panel ${isCollapsed ? 'collapsed' : ''} ${isDragging ? 'dragging' : ''}`}
+      className={`model-chat-panel ${isCollapsed ? 'collapsed' : ''} ${isDragging ? 'dragging' : ''} ${isResizing ? 'resizing' : ''}`}
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
+        width: isCollapsed ? '240px' : `${size.width}px`,
+        height: isCollapsed ? 'auto' : `${size.height}px`,
       }}
     >
       {/* Draggable Header */}
@@ -505,6 +631,42 @@ CORE RULES:
         </div>
 
         <div className="model-chat-header-actions">
+          {!isCollapsed && (
+            <button
+              type="button"
+              className="model-chat-icon-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                const isLarge = size.width >= 460 || size.height >= 520;
+                if (isLarge) {
+                  setSize({ width: 320, height: 420 });
+                } else {
+                  const maxW = Math.min(540, window.innerWidth - 40);
+                  const maxH = Math.min(620, window.innerHeight - 80);
+                  setSize({ width: maxW, height: maxH });
+                }
+              }}
+              title={size.width >= 460 ? 'Standard size' : 'Expand size'}
+              aria-label={size.width >= 460 ? 'Standard size' : 'Expand size'}
+            >
+              {size.width >= 460 ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                  <line x1="14" y1="10" x2="21" y2="3" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 3 21 3 21 9" />
+                  <polyline points="9 21 3 21 3 15" />
+                  <line x1="21" y1="3" x2="14" y2="10" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              )}
+            </button>
+          )}
+
           <button
             type="button"
             className="model-chat-icon-btn"
@@ -615,6 +777,20 @@ CORE RULES:
               </svg>
             </button>
           </form>
+
+          {/* Interactive Multi-Directional Resize Handles */}
+          <div className="chat-resize-handle top" onPointerDown={(e) => handleResizeStart('n', e)} />
+          <div className="chat-resize-handle bottom" onPointerDown={(e) => handleResizeStart('s', e)} />
+          <div className="chat-resize-handle left" onPointerDown={(e) => handleResizeStart('w', e)} />
+          <div className="chat-resize-handle right" onPointerDown={(e) => handleResizeStart('e', e)} />
+          <div className="chat-resize-handle top-left" onPointerDown={(e) => handleResizeStart('nw', e)} />
+          <div className="chat-resize-handle top-right" onPointerDown={(e) => handleResizeStart('ne', e)} />
+          <div className="chat-resize-handle bottom-left" onPointerDown={(e) => handleResizeStart('sw', e)} />
+          <div className="chat-resize-handle bottom-right" onPointerDown={(e) => handleResizeStart('se', e)} title="Drag to resize">
+            <svg viewBox="0 0 10 10" className="resize-grip-icon">
+              <path d="M8 2 L2 8 M9 5 L5 9 M9 8 L8 9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+          </div>
         </>
       )}
     </div>

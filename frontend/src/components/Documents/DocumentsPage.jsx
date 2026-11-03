@@ -102,7 +102,9 @@ export default function DocumentsPage({ onOpenDocument }) {
 
                   <span className="td-id">{doc.id}</span>
                   <span className="td-size">{formatSize(doc.fileSize)}</span>
-                  <span className="td-status">{doc.uploading ? 'uploading...' : (doc.status || 'not checked')}</span>
+                  <span className="td-status" title={doc.local_path ? `Local path: ${doc.local_path}` : ''}>
+                    {doc.uploading ? 'uploading...' : (doc.local_path ? 'cached' : (doc.status || 'not checked'))}
+                  </span>
                 </div>
               ))}
             </div>

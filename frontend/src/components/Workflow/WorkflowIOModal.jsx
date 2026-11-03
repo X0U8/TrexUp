@@ -39,7 +39,36 @@ const INPUT_DATA_TYPES = [
   },
 ];
 
-export default function WorkflowIOModal({ isOpen, node, onClose, onUpdate }) {
+const TRIGGER_OPTIONS = [
+  {
+    id: 'file_drop',
+    label: 'On File Drop Resources',
+    desc: 'Runs automatically when resources or files are dropped on the canvas',
+    badge: 'Auto',
+  },
+  {
+    id: 'node_connect',
+    label: 'On Connect',
+    desc: 'Runs automatically when two nodes are connected with a thread',
+    badge: 'Auto',
+  },
+  {
+    id: 'manual',
+    label: 'Manual',
+    desc: 'Runs only on-demand when explicitly executed by the user or assistant',
+    badge: 'Default',
+  },
+];
+
+export default function WorkflowIOModal({ isOpen, node, workflowName, onClose, onUpdate }) {
+  const getInitialTrigger = (n) => {
+    if (n?.trigger) return n.trigger;
+    if (workflowName === 'extraction') return 'file_drop';
+    if (workflowName === 'connection_synthesis') return 'node_connect';
+    return 'manual';
+  };
+
+  const [trigger, setTrigger] = useState(getInitialTrigger(node));
   const [acceptedTypes, setAcceptedTypes] = useState([
     'documents',
     'text',
@@ -48,18 +77,24 @@ export default function WorkflowIOModal({ isOpen, node, onClose, onUpdate }) {
     'data',
     'canvas_nodes',
   ]);
-  const [sourceScope, setSourceScope] = useState('uploaded_documents');
-
   // Sync state if node changes
   useEffect(() => {
     if (!node) return;
+    setTrigger(getInitialTrigger(node));
     setAcceptedTypes(
       node.acceptedTypes || ['documents', 'text', 'images', 'audio', 'data', 'canvas_nodes']
     );
-    setSourceScope(node.sourceScope || 'uploaded_documents');
-  }, [node, isOpen]);
+  }, [node, workflowName, isOpen]);
 
   if (!isOpen || !node) return null;
+
+  const handleTriggerChange = (triggerId) => {
+    setTrigger(triggerId);
+    onUpdate?.(node.id, {
+      ...node,
+      trigger: triggerId,
+    });
+  };
 
   const toggleAcceptedType = (typeId) => {
     const next = acceptedTypes.includes(typeId)
@@ -73,10 +108,7 @@ export default function WorkflowIOModal({ isOpen, node, onClose, onUpdate }) {
     });
   };
 
-  const handleSourceScopeChange = (scope) => {
-    setSourceScope(scope);
-    onUpdate?.(node.id, { ...node, sourceScope: scope });
-  };
+  const activeTriggerObj = TRIGGER_OPTIONS.find((t) => t.id === trigger) || TRIGGER_OPTIONS[2];
 
   return (
     <div className="wf-io-backdrop" onClick={onClose}>
@@ -85,10 +117,10 @@ export default function WorkflowIOModal({ isOpen, node, onClose, onUpdate }) {
         <div className="wf-io-header">
           <div className="wf-io-title-wrap">
             <div>
-              <h2 className="wf-io-title">Workflow Input Settings</h2>
-              <p className="wf-io-subtitle">
-                Select supported formats and material sources for this workflow
-              </p>
+              <h2 className="wf-io-title">
+                {node.type === 'output' ? 'Workflow Output Settings' : 'Workflow Input & Trigger'}
+              </h2>
+              <span className="wf-io-subid">Node ID: {node.id}</span>
             </div>
           </div>
           <button
@@ -106,9 +138,47 @@ export default function WorkflowIOModal({ isOpen, node, onClose, onUpdate }) {
 
         {/* Modal Body */}
         <div className="wf-io-body">
-          {/* Accepted Input Formats */}
-          <div className="wf-io-section">
+          {/* Trigger Event Section (Input node only - single choice) */}
+          {node.type === 'input' && (
+            <div className="wf-io-section">
+              <span className="wf-io-label">Trigger Source</span>
+              <p className="wf-io-desc">Select how this workflow is activated. Only one trigger can be active.</p>
 
+              <div className="wf-trigger-cards-col">
+                {TRIGGER_OPTIONS.map((opt) => {
+                  const isSelected = trigger === opt.id;
+                  return (
+                    <div
+                      key={opt.id}
+                      className={`wf-trigger-card ${isSelected ? 'active' : ''}`}
+                      onClick={() => handleTriggerChange(opt.id)}
+                    >
+                      <div className="wf-trigger-radio">
+                        <div className={`wf-trigger-radio-circle ${isSelected ? 'selected' : ''}`}>
+                          {isSelected && <div className="wf-trigger-radio-dot" />}
+                        </div>
+                      </div>
+
+                      <div className="wf-trigger-content">
+                        <div className="wf-trigger-title-row">
+                          <span className="wf-trigger-title">{opt.label}</span>
+                          <span className={`wf-trigger-badge ${opt.id}`}>
+                            {opt.badge}
+                          </span>
+                        </div>
+                        <span className="wf-trigger-desc">{opt.desc}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Accepted Input Formats - ALWAYS VISIBLE */}
+          <div className="wf-io-section">
+            <span className="wf-io-label">Accepted Input Formats</span>
+            <p className="wf-io-desc">Select which data and file types this workflow accepts and processes.</p>
             <div className="wf-io-grid">
               {INPUT_DATA_TYPES.map((t) => {
                 const isSelected = acceptedTypes.includes(t.id);
@@ -135,40 +205,12 @@ export default function WorkflowIOModal({ isOpen, node, onClose, onUpdate }) {
             </div>
           </div>
 
-          {/* Input Source Scope */}
-          <div className="wf-io-section">
-            <span className="wf-io-label">Source Scope</span>
-            <p className="wf-io-desc">Where this workflow looks for incoming files.</p>
-            <div className="wf-io-scope-tabs">
-              <button
-                type="button"
-                className={`wf-scope-tab ${sourceScope === 'uploaded_documents' ? 'active' : ''}`}
-                onClick={() => handleSourceScopeChange('uploaded_documents')}
-              >
-                Project Materials
-              </button>
-              <button
-                type="button"
-                className={`wf-scope-tab ${sourceScope === 'canvas_nodes' ? 'active' : ''}`}
-                onClick={() => handleSourceScopeChange('canvas_nodes')}
-              >
-                Active Exploration
-              </button>
-              <button
-                type="button"
-                className={`wf-scope-tab ${sourceScope === 'workspace_all' ? 'active' : ''}`}
-                onClick={() => handleSourceScopeChange('workspace_all')}
-              >
-                Entire Workspace
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Modal Footer */}
         <div className="wf-io-footer">
           <span className="wf-io-footer-summary">
-            {acceptedTypes.length} format{acceptedTypes.length === 1 ? '' : 's'} enabled
+            Trigger: <strong>{activeTriggerObj.label}</strong> • {acceptedTypes.length} format{acceptedTypes.length === 1 ? '' : 's'} enabled
           </span>
           <button type="button" className="wf-io-done-btn" onClick={onClose}>
             Done

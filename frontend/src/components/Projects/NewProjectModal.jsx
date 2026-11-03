@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './NewProjectModal.css';
 import { saveProject } from '../../utils/db';
+import { DEFAULT_EXTRACTION_WORKFLOW, DEFAULT_CONNECTION_WORKFLOW } from '../../utils/workflowTemplates';
 
 export default function NewProjectModal({ isOpen, onClose, onCreated }) {
   const [name, setName] = useState('');
@@ -43,6 +44,16 @@ export default function NewProjectModal({ isOpen, onClose, onCreated }) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       nodes: {},
+      explorations: ['exploration_01'],
+      currentExploration: 'exploration_01',
+      workflows: ['extraction', 'connection_synthesis'],
+      currentWorkflow: 'extraction',
+      workflowsData: {
+        extraction: DEFAULT_EXTRACTION_WORKFLOW,
+        connection_synthesis: DEFAULT_CONNECTION_WORKFLOW,
+      },
+      engines: ['file_detection', 'document_extractor', 'node_context_builder'],
+      currentEngine: 'file_detection',
     };
 
     try {

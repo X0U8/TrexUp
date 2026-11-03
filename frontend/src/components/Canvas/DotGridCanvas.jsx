@@ -6,6 +6,7 @@ export default function DotGridCanvas({
   onCameraChange,
   onDropFile,
   onDropModel,
+  onDropEngine,
   onCanvasPointerMove,
   onCanvasPointerUp,
   onCanvasClick,
@@ -118,12 +119,12 @@ export default function DotGridCanvas({
     e.preventDefault();
     setIsDragOver(false);
 
-    // Check if dragging model from ModelsPanel onto canvas
+    // Check if dragging model or engine from ModelsPanel onto canvas
     const rawData = e.dataTransfer.getData('application/json');
-    if (rawData && onDropModel && viewportRef.current) {
+    if (rawData && viewportRef.current) {
       try {
         const parsed = JSON.parse(rawData);
-        if (parsed?.type === 'workflow-model' && parsed.model) {
+        if (parsed?.type === 'workflow-model' && parsed.model && onDropModel) {
           const rect = viewportRef.current.getBoundingClientRect();
           const screenX = e.clientX - rect.left;
           const screenY = e.clientY - rect.top;
@@ -132,7 +133,16 @@ export default function DotGridCanvas({
           onDropModel(parsed.model, { x: worldX, y: worldY });
           return;
         }
-      } catch (err) {
+        if (parsed?.type === 'workflow-engine' && parsed.engine && (onDropEngine || onDropModel)) {
+          const rect = viewportRef.current.getBoundingClientRect();
+          const screenX = e.clientX - rect.left;
+          const screenY = e.clientY - rect.top;
+          const worldX = (screenX - camera.x) / camera.zoom - 85;
+          const worldY = (screenY - camera.y) / camera.zoom - 28;
+          (onDropEngine || onDropModel)(parsed.engine, { x: worldX, y: worldY });
+          return;
+        }
+      } catch {
         // ignore
       }
     }

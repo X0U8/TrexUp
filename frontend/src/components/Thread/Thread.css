@@ -27,14 +27,57 @@
   transition: stroke 0.15s ease, stroke-width 0.15s ease;
 }
 
+.thread-core.has-condition {
+  stroke: #475569;
+  stroke-width: 2.2px;
+}
+
+.thread-core.running {
+  stroke: #2563eb;
+  stroke-width: 2.5px;
+  stroke-dasharray: 6 5;
+  animation: threadDataFlow 1.2s linear infinite;
+}
+
+@keyframes threadDataFlow {
+  from {
+    stroke-dashoffset: 22;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.thread-glow.has-condition {
+  stroke: rgba(71, 85, 105, 0.3);
+}
+
+.thread-glow.running {
+  stroke: rgba(37, 99, 235, 0.45);
+}
+
+.thread-glow.rejected {
+  stroke: rgba(239, 68, 68, 0.35);
+}
+
+.thread-core.rejected {
+  stroke: #ef4444;
+  stroke-width: 2.2px;
+}
+
 .thread-port-glow {
   fill: #cbd5e1;
   opacity: 0.9;
 }
 
+.thread-port-glow.rejected {
+  fill: #ef4444;
+}
+
 .thread-port-core {
   fill: #ffffff;
 }
+
 
 /* Interactive Hit Target & Hover Highlight */
 .thread-interactive-hit {
@@ -45,41 +88,23 @@
 .thread-hit-path {
   fill: none;
   stroke: transparent;
-  stroke-width: 20px;
-  stroke-linecap: round;
-}
-
-.thread-delete-pill {
-  pointer-events: all;
-  opacity: 0;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  cursor: pointer;
-}
-
-.thread-delete-circle {
-  fill: #ef4444;
-  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.4));
-}
-
-.thread-delete-x {
-  fill: none;
-  stroke: #ffffff;
-  stroke-width: 1.8;
+  stroke-width: 22px;
   stroke-linecap: round;
 }
 
 /* On hovering the thread hit target */
 .thread-interactive-hit:hover ~ .thread-glow,
 .thread-interactive-hit:hover + .thread-glow {
-  stroke: rgba(239, 68, 68, 0.45);
+  stroke: rgba(59, 130, 246, 0.35);
 }
 
 .thread-interactive-hit:hover ~ .thread-core,
 .thread-interactive-hit:hover + .thread-core {
-  stroke: #ef4444;
+  stroke: #3b82f6;
   stroke-width: 2.5px;
 }
 
-.thread-interactive-hit:hover .thread-delete-pill {
-  opacity: 1;
+.thread-interactive-hit:hover ~ .thread-core.rejected,
+.thread-interactive-hit:hover + .thread-core.rejected {
+  stroke: #dc2626;
 }

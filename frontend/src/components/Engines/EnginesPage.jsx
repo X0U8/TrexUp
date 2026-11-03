@@ -1,137 +1,1241 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
+import EngineCodeEditor from './EngineCodeEditor';
 import './EnginesPage.css';
 
-const DEFAULT_ENGINES = {
-  file_detection: {
-    id: 'file_detection',
-    name: 'File Detection Engine',
-    code: `# File Detection Engine
+const MANIFEST_SPEC_GUIDE = `# Manifest specification:
+# inputs: "text", "file", "image", "audio", "video", "json", "number", "boolean"
+# outputs: "json", "file", "text", "image", "audio"
+# "required": True ensures the field must be provided to run.`;
+
+export const DEFAULT_ENGINES = {
+  resource_bridge: {
+    id: 'resource_bridge',
+    name: 'resource_bridge',
+    code: `# resource_bridge
 # Pure function entry: def run(input_data, context=None) -> dict
 
-import os
-import base64
-import mimetypes
+${MANIFEST_SPEC_GUIDE}
 
-MAGIC_SIGNATURES = [
-    (b'%PDF', 'pdf', 'document'),
-    (b'\\x89PNG\\r\\n\\x1a\\n', 'png', 'image'),
-    (b'\\xff\\xd8\\xff', 'jpeg', 'image'),
-    (b'GIF87a', 'gif', 'image'),
-    (b'GIF89a', 'gif', 'image'),
-    (b'RIFF', 'wav', 'audio'),
-    (b'ID3', 'mp3', 'audio'),
-    (b'\\xff\\xfb', 'mp3', 'audio'),
-    (b'PK\\x03\\x04', 'zip', 'archive'),
-]
+MANIFEST = {
+    "name": "resource_bridge",
+    "version": "1.0.0",
+    "description": "Verifies local OS cached document existence; downloads from Cloudinary URL or writes binary if missing; guarantees valid local filesystem path.",
+    "inputs": {
+        "file": {
+            "type": "file",
+            "required": False,
+            "description": "File payload containing doc_id, file_name, cloudinaryUrl, or local_path"
+        }
+    },
+    "outputs": {
+        "result": {
+            "type": "json",
+            "description": "Resolved OS local_path, cache status, verified file size, and availability"
+        }
+    }
+}
+
+import os
+import io
+import re
+import json
+import base64
+import urllib.request
+
+def run(input_data, context=None):
+    if not isinstance(input_data, dict):
+        return {
+            "valid": False,
+            "status": "invalid_input",
+            "error": "Expected dictionary input"
+        }
+
+    doc_info = input_data.get("file") if isinstance(input_data.get("file"), dict) else input_data
+    doc_id = (
+        doc_info.get("doc_id")
+        or input_data.get("doc_id")
+        or doc_info.get("id")
+        or input_data.get("id")
+        or ""
+    )
+    file_name = (
+        doc_info.get("file_name")
+        or doc_info.get("name")
+        or input_data.get("file_name")
+        or input_data.get("name")
+        or "document"
+    )
+    local_path = (
+        doc_info.get("local_path")
+        or doc_info.get("file_path")
+        or input_data.get("local_path")
+        or input_data.get("file_path")
+        or ""
+    )
+    cloudinary_url = (
+        doc_info.get("cloudinaryUrl")
+        or doc_info.get("url")
+        or input_data.get("cloudinaryUrl")
+        or input_data.get("url")
+        or ""
+    )
+    b64_data = (
+        doc_info.get("file_bytes_b64")
+        or input_data.get("file_bytes_b64")
+        or doc_info.get("b64")
+        or ""
+    )
+
+    storage_dir = globals().get("DOCS_STORAGE_DIR")
+    if not storage_dir or not os.path.exists(storage_dir):
+        storage_dir = os.path.abspath("storage/documents")
+        if not os.path.exists(storage_dir):
+            storage_dir = os.path.join(os.getcwd(), "storage", "documents")
+    os.makedirs(storage_dir, exist_ok=True)
+
+    clean_prefix = re.sub(r"[^a-zA-Z0-9_-]", "_", str(doc_id)) if doc_id else "doc"
+    clean_filename = os.path.basename(file_name)
+    target_path = local_path if (local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0) else os.path.join(storage_dir, f"{clean_prefix}_{clean_filename}")
+
+    # 1. Check if already cached and valid on local OS
+    if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+        actual_size = os.path.getsize(target_path)
+        return {
+            "valid": True,
+            "status": "cached",
+            "doc_id": doc_id,
+            "file_name": clean_filename,
+            "local_path": target_path,
+            "file_path": target_path,
+            "size_bytes": actual_size,
+            "source": "local_os_cache",
+            "message": f"Verified local document on disk ({actual_size} bytes)"
+        }
+
+    # 2. If not on disk, save from base64 if present
+    if b64_data:
+        try:
+            if "," in b64_data[:60]:
+                b64_data = b64_data.split(",", 1)[1]
+            decoded = base64.b64decode(b64_data)
+            with open(target_path, "wb") as f:
+                f.write(decoded)
+            actual_size = len(decoded)
+            return {
+                "valid": True,
+                "status": "cached",
+                "doc_id": doc_id,
+                "file_name": clean_filename,
+                "local_path": target_path,
+                "file_path": target_path,
+                "size_bytes": actual_size,
+                "source": "payload_binary",
+                "message": f"Cached binary from payload ({actual_size} bytes)"
+            }
+        except Exception as e:
+            pass
+
+    # 3. If not on disk, download from Cloudinary URL
+    if cloudinary_url and cloudinary_url.startswith(("http://", "https://")):
+        try:
+            req = urllib.request.Request(cloudinary_url, headers={"User-Agent": "Trex-Resource-Bridge/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                content = resp.read()
+                with open(target_path, "wb") as f:
+                    f.write(content)
+            actual_size = os.path.getsize(target_path)
+            return {
+                "valid": True,
+                "status": "downloaded",
+                "doc_id": doc_id,
+                "file_name": clean_filename,
+                "local_path": target_path,
+                "file_path": target_path,
+                "size_bytes": actual_size,
+                "source": "cloudinary",
+                "message": f"Downloaded and cached from Cloudinary ({actual_size} bytes)"
+            }
+        except Exception as e:
+            return {
+                "valid": False,
+                "status": "download_failed",
+                "error": f"Failed downloading from Cloudinary: {str(e)}",
+                "doc_id": doc_id,
+                "file_name": clean_filename
+            }
+
+    return {
+        "valid": False,
+        "status": "missing_resource",
+        "error": f"Document '{clean_filename}' does not exist on disk and no Cloudinary URL was provided",
+        "doc_id": doc_id
+    }
+`,
+  },
+  file_detection: {
+    id: 'file_detection',
+    name: 'file_detection',
+    code: `# File Detection
+# Pure function entry: def run(input_data, context=None) -> dict
+
+${MANIFEST_SPEC_GUIDE}
+
+MANIFEST = {
+    "name": "file_detection",
+    "version": "2.0.0",
+    "description": "Enterprise-grade binary & structural inspector: detects file type, corruption, extension spoofing, executable risk, and extraction routing.",
+    "inputs": {
+        "file": {
+            "type": "file",
+            "required": True,
+            "description": "Binary or text file payload with metadata"
+        }
+    },
+    "outputs": {
+        "result": {
+            "type": "json",
+            "description": "Full detection profile including status, validation, category, format, risk, and routing directives"
+        }
+    }
+}
+
+import os
+import io
+import re
+import json
+import base64
+import struct
+import mimetypes
+import zipfile
 
 MAX_FILE_SIZE_MB = 50.0
 
+# Canonical magic signatures: (signature, format, category, offset)
+MAGIC_SIGNATURES = [
+    # Documents
+    (b'%PDF-', 'pdf', 'document', 0),
+    (b'{\\\\rtf', 'rtf', 'document', 0),
+    (b'%!PS', 'ps', 'document', 0),
+
+    # Images
+    (b'\\x89PNG\\r\\n\\x1a\\n', 'png', 'image', 0),
+    (b'\\xff\\xd8\\xff', 'jpeg', 'image', 0),
+    (b'GIF87a', 'gif', 'image', 0),
+    (b'GIF89a', 'gif', 'image', 0),
+    (b'BM', 'bmp', 'image', 0),
+    (b'II*\\x00', 'tiff', 'image', 0),
+    (b'MM\\x00*', 'tiff', 'image', 0),
+    (b'\\x00\\x00\\x01\\x00', 'ico', 'image', 0),
+
+    # Audio
+    (b'ID3', 'mp3', 'audio', 0),
+    (b'\\xff\\xfb', 'mp3', 'audio', 0),
+    (b'\\xff\\xf3', 'mp3', 'audio', 0),
+    (b'\\xff\\xf2', 'mp3', 'audio', 0),
+    (b'fLaC', 'flac', 'audio', 0),
+    (b'OggS', 'ogg', 'audio', 0),
+
+    # Video / EBML
+    (b'\\x1a\\x45\\xdf\\xa3', 'webm', 'video', 0),
+    (b'FLV\\x01', 'flv', 'video', 0),
+
+    # Archives & Containers
+    (b'PK\\x03\\x04', 'zip', 'archive', 0),
+    (b'PK\\x05\\x06', 'zip', 'archive', 0),
+    (b'PK\\x07\\x08', 'zip', 'archive', 0),
+    (b'\\x1f\\x8b\\x08', 'gz', 'archive', 0),
+    (b'BZh', 'bz2', 'archive', 0),
+    (b'\\xfd7zXZ\\x00', 'xz', 'archive', 0),
+    (b'7z\\xbc\\xaf\\x27\\x1c', '7z', 'archive', 0),
+    (b'Rar!\\x1a\\x07\\x00', 'rar', 'archive', 0),
+    (b'Rar!\\x1a\\x07\\x01\\x00', 'rar', 'archive', 0),
+
+    # Security / Executable Signatures
+    (b'MZ', 'exe', 'executable', 0),
+    (b'\\x7fELF', 'elf', 'executable', 0),
+    (b'\\xfe\\xed\\xfa\\xce', 'mach-o', 'executable', 0),
+    (b'\\xfe\\xed\\xfa\\xcf', 'mach-o', 'executable', 0),
+    (b'\\xcf\\xfa\\xed\\xfe', 'mach-o', 'executable', 0),
+    (b'\\xca\\xfe\\xba\\xbe', 'class', 'executable', 0),
+    (b'\\x00asm', 'wasm', 'executable', 0),
+]
+
+# Executable or dangerous extensions to quarantine
+DANGEROUS_EXTENSIONS = {
+    'exe', 'bat', 'cmd', 'sh', 'bash', 'zsh', 'ps1', 'vbs', 'js', 'jar',
+    'msi', 'com', 'scr', 'dll', 'so', 'dylib', 'bin', 'elf', 'wsf'
+}
+
+# Format compatibility groups for mismatch checking
+COMPATIBILITY_MAP = {
+    'jpeg': {'jpg', 'jpeg', 'jpe', 'jfif'},
+    'jpg': {'jpg', 'jpeg', 'jpe', 'jfif'},
+    'png': {'png'},
+    'gif': {'gif'},
+    'webp': {'webp'},
+    'pdf': {'pdf'},
+    'tiff': {'tif', 'tiff'},
+    'bmp': {'bmp'},
+    'wav': {'wav'},
+    'mp3': {'mp3'},
+    'flac': {'flac'},
+    'ogg': {'ogg', 'oga', 'ogv'},
+    'mp4': {'mp4', 'm4a', 'm4v'},
+    'webm': {'webm', 'mkv'},
+    'zip': {'zip'},
+    'docx': {'docx'},
+    'xlsx': {'xlsx'},
+    'pptx': {'pptx'},
+    'csv': {'csv', 'txt'},
+    'tsv': {'tsv', 'txt'},
+    'json': {'json', 'txt'},
+    'xml': {'xml', 'svg'},
+    'svg': {'svg', 'xml'},
+    'html': {'html', 'htm'},
+    'markdown': {'md', 'markdown', 'txt'},
+    'text': {'txt', 'log', 'cfg', 'ini', 'env', 'conf'}
+}
+
+def inspect_riff_container(header_bytes):
+    """Inspects RIFF container (WAV, WebP, AVI)"""
+    if len(header_bytes) >= 12 and header_bytes.startswith(b'RIFF'):
+        tag = header_bytes[8:12]
+        if tag == b'WAVE':
+            return 'wav', 'audio'
+        if tag == b'WEBP':
+            return 'webp', 'image'
+        if tag == b'AVI ':
+            return 'avi', 'video'
+    return None, None
+
+def inspect_isom_container(header_bytes):
+    """Inspects ISO Base Media File Format (MP4, MOV, M4A)"""
+    if len(header_bytes) >= 12:
+        if header_bytes[4:8] == b'ftyp':
+            brand = header_bytes[8:12]
+            if brand in (b'M4A ', b'M4B '):
+                return 'm4a', 'audio'
+            if brand in (b'qt  ', b'moov'):
+                return 'mov', 'video'
+            return 'mp4', 'video'
+    return None, None
+
+def inspect_zip_subtypes(raw_bytes, claimed_ext):
+    """
+    Distinguishes DOCX, XLSX, PPTX, and standard ZIP.
+    Returns (format, category, is_corrupted, warnings)
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw_bytes), 'r') as zf:
+            namelist = set(zf.namelist())
+            if any(name.startswith('word/') for name in namelist) or '[Content_Types].xml' in namelist and claimed_ext in ('docx', 'docm'):
+                return 'docx', 'document', False, []
+            if any(name.startswith('xl/') for name in namelist) or claimed_ext in ('xlsx', 'xlsm'):
+                return 'xlsx', 'tabular', False, []
+            if any(name.startswith('ppt/') for name in namelist) or claimed_ext in ('pptx', 'pptm'):
+                return 'pptx', 'document', False, []
+            return 'zip', 'archive', False, []
+    except zipfile.BadZipFile:
+        if claimed_ext in ('docx', 'xlsx', 'pptx'):
+            return claimed_ext, 'document' if claimed_ext != 'xlsx' else 'tabular', True, ['Truncated or damaged Office archive container']
+        return 'zip', 'archive', True, ['Truncated or corrupt ZIP archive']
+    except Exception as e:
+        return 'zip', 'archive', True, [f'Archive inspection error: {str(e)}']
+
+def inspect_text_and_data(raw_bytes, claimed_ext):
+    """
+    Inspects non-binary text payloads: JSON, CSV, SVG, XML, HTML, Markdown, Plain Text.
+    """
+    sample = raw_bytes[:16384]
+    if b'\\x00' in sample:
+        return None, None, False, ['Unidentified binary data with null bytes']
+
+    try:
+        text_str = sample.decode('utf-8')
+    except UnicodeDecodeError:
+        try:
+            text_str = sample.decode('latin-1')
+        except Exception:
+            return None, None, True, ['Non-decodable text encoding']
+
+    stripped = text_str.strip()
+    if not stripped:
+        return 'text', 'text', False, []
+
+    # 1. JSON
+    if (stripped.startswith('{') and stripped.endswith('}')) or (stripped.startswith('[') and stripped.endswith(']')):
+        try:
+            json.loads(text_str)
+            return 'json', 'code', False, []
+        except Exception:
+            if claimed_ext == 'json':
+                return 'json', 'code', True, ['Malformed JSON syntax']
+
+    # 2. SVG Image
+    if '<svg' in text_str.lower() and ('xmlns' in text_str.lower() or '</svg>' in text_str.lower()):
+        return 'svg', 'image', False, []
+
+    # 3. HTML
+    if '<!doctype html' in text_str.lower() or '<html' in text_str.lower():
+        return 'html', 'code', False, []
+
+    # 4. XML
+    if stripped.startswith('<?xml'):
+        return 'xml', 'code', False, []
+
+    # 5. CSV / TSV
+    lines = [line for line in text_str.splitlines() if line.strip()][:10]
+    if len(lines) >= 2:
+        for delimiter, fmt in ((',', 'csv'), ('\\t', 'tsv'), (';', 'csv')):
+            counts = [line.count(delimiter) for line in lines]
+            if counts[0] > 0 and all(c == counts[0] for c in counts):
+                return fmt, 'tabular', False, []
+
+    # 6. Markdown
+    if claimed_ext in ('md', 'markdown') or re.search(r'^(#{1,6}\\s|[-*+]\\s|\\[.+\\]\\(.+\\))', stripped, re.MULTILINE):
+        return 'markdown', 'text', False, []
+
+    return 'text', 'text', False, []
+
 def run(input_data, context=None):
-    if isinstance(input_data, dict) and ('file_name' in input_data or 'name' in input_data):
-        file_name = input_data.get('file_name') or input_data.get('name', 'unnamed')
-        size_bytes = input_data.get('size_bytes', 0)
-        size_mb = size_bytes / (1024 * 1024) if size_bytes else 0.0
+    """
+    Production-ready File Detection inspector.
+    Inspects binary headers, formats, corruption, extension spoofing, and security risks.
+    """
+    file_info = input_data.get('file') if isinstance(input_data, dict) and 'file' in input_data else input_data
+    if not isinstance(file_info, dict):
+        return {
+            "status": "rejected",
+            "valid": False,
+            "reason": "Missing or invalid file input payload",
+            "category": "unsupported"
+        }
 
-        if size_mb > MAX_FILE_SIZE_MB:
-            return {
-                "status": "rejected",
-                "valid": False,
-                "reason": f"File exceeds maximum limit of {MAX_FILE_SIZE_MB}MB",
-                "file_name": file_name,
-                "size_mb": round(size_mb, 2)
-            }
+    file_name = file_info.get('file_name') or file_info.get('name') or input_data.get('file_name') or input_data.get('name') or 'unnamed'
+    size_bytes = file_info.get('size_bytes') or file_info.get('size') or input_data.get('size_bytes') or input_data.get('size') or 0
+    b64_data = file_info.get('file_bytes_b64') or file_info.get('b64') or input_data.get('file_bytes_b64') or input_data.get('b64') or ''
+    declared_mime = file_info.get('mime_type') or input_data.get('mime_type') or ''
+    local_path = file_info.get('file_path') or file_info.get('local_path') or input_data.get('file_path') or input_data.get('local_path') or ''
 
-        # 1. Read real binary magic bytes from the header
-        raw_header = b""
-        b64_data = input_data.get("file_bytes_b64")
-        if b64_data:
-            try:
-                raw_header = base64.b64decode(b64_data)
-            except Exception:
-                pass
+    base_name = os.path.basename(file_name)
+    ext = os.path.splitext(base_name)[1].lower().lstrip('.')
+    claimed_format = ext or 'unknown'
 
-        real_format = None
-        real_category = None
-        for sig, fmt, cat in MAGIC_SIGNATURES:
-            if raw_header.startswith(sig) or (sig == b'RIFF' and sig in raw_header[:12]):
+    # Check 1: 0-Byte or Empty File
+    if (size_bytes is not None and size_bytes <= 0) and not b64_data and not (local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0):
+        return {
+            "status": "corrupted",
+            "valid": False,
+            "reason": "File is empty (0 bytes). No content can be extracted.",
+            "file_name": file_name,
+            "claimed_format": claimed_format,
+            "category": "unsupported",
+            "size_bytes": 0,
+            "size_mb": 0.0,
+            "is_empty": True,
+            "is_corrupted": True,
+            "is_supported": False,
+            "security_risk": "none",
+            "warnings": ["Zero-byte file upload"]
+        }
+
+    # Check 2: File Size Cap
+    size_mb = (size_bytes / (1024 * 1024)) if size_bytes else (len(b64_data) * 3 / 4 / (1024 * 1024))
+    if size_mb > MAX_FILE_SIZE_MB:
+        return {
+            "status": "rejected",
+            "valid": False,
+            "reason": f"File exceeds maximum allowed limit of {MAX_FILE_SIZE_MB}MB ({round(size_mb, 2)}MB)",
+            "file_name": file_name,
+            "claimed_format": claimed_format,
+            "size_mb": round(size_mb, 2),
+            "is_empty": False,
+            "is_corrupted": False,
+            "is_supported": False,
+            "security_risk": "medium",
+            "warnings": ["Size limit exceeded"]
+        }
+
+    # Decode binary data
+    raw_bytes = file_info.get("header_bytes") or input_data.get("header_bytes") or b""
+    is_corrupted = False
+    warnings = []
+
+    if not raw_bytes and local_path and os.path.exists(local_path):
+        try:
+            with open(local_path, "rb") as f:
+                raw_bytes = f.read(65536)
+            size_bytes = os.path.getsize(local_path)
+        except Exception as e:
+            warnings.append(f"Failed to read local cached file: {str(e)}")
+
+    if b64_data and not raw_bytes:
+        try:
+            if ',' in b64_data[:60]:
+                b64_data = b64_data.split(',', 1)[1]
+            raw_bytes = base64.b64decode(b64_data)
+        except Exception as e:
+            is_corrupted = True
+            warnings.append(f"Corrupted or invalid base64 encoding: {str(e)}")
+
+    if not raw_bytes and is_corrupted:
+        return {
+            "status": "corrupted",
+            "valid": False,
+            "reason": "Base64 binary payload is malformed or unreadable",
+            "file_name": file_name,
+            "claimed_format": claimed_format,
+            "category": "unsupported",
+            "is_empty": False,
+            "is_corrupted": True,
+            "is_supported": False,
+            "security_risk": "medium",
+            "warnings": warnings
+        }
+
+    real_format = None
+    real_category = None
+
+    # Check 3: RIFF containers (WAV, WebP, AVI)
+    riff_fmt, riff_cat = inspect_riff_container(raw_bytes[:16])
+    if riff_fmt:
+        real_format, real_category = riff_fmt, riff_cat
+
+    # Check 4: ISO Base Media File Format (MP4, MOV, M4A)
+    if not real_format:
+        isom_fmt, isom_cat = inspect_isom_container(raw_bytes[:32])
+        if isom_fmt:
+            real_format, real_category = isom_fmt, isom_cat
+
+    # Check 5: Magic Signatures matching
+    if not real_format:
+        for sig, fmt, cat, offset in MAGIC_SIGNATURES:
+            if len(raw_bytes) >= offset + len(sig) and raw_bytes[offset:offset + len(sig)] == sig:
                 real_format = fmt
                 real_category = cat
                 break
 
-        # 2. Check declared filename extension
-        ext = os.path.splitext(file_name)[1].lower().lstrip('.')
-        claimed_format = ext or 'unknown'
+    # Check 6: PKZIP vs Microsoft Office (DOCX, XLSX, PPTX)
+    if real_format == 'zip':
+        office_fmt, office_cat, zip_corrupt, zip_warn = inspect_zip_subtypes(raw_bytes, claimed_format)
+        real_format = office_fmt
+        real_category = office_cat
+        if zip_corrupt:
+            is_corrupted = True
+        warnings.extend(zip_warn)
 
-        # 3. Detect mismatched or renamed extensions (e.g. PDF renamed to .jpg)
-        if real_format:
-            compat = {
-                'jpeg': ['jpg', 'jpeg'],
-                'jpg': ['jpg', 'jpeg'],
-                'pdf': ['pdf'],
-                'png': ['png'],
-                'wav': ['wav'],
-                'mp3': ['mp3'],
-                'gif': ['gif'],
-            }
-            allowed_exts = compat.get(real_format, [real_format])
-            if claimed_format not in allowed_exts:
-                return {
-                    "status": "mismatch_detected",
-                    "valid": False,
-                    "reason": f"Header indicates real format is {real_format.upper()}, but filename claimed .{claimed_format}",
-                    "file_name": file_name,
-                    "real_format": real_format,
-                    "claimed_format": claimed_format,
-                    "category": real_category,
-                    "size_mb": round(size_mb, 2)
-                }
+    # Check 7: Text, Tabular, SVG, and Code formats
+    if not real_format and raw_bytes:
+        text_fmt, text_cat, text_corrupt, text_warn = inspect_text_and_data(raw_bytes, claimed_format)
+        if text_fmt:
+            real_format = text_fmt
+            real_category = text_cat
+            if text_corrupt:
+                is_corrupted = True
+            warnings.extend(text_warn)
 
-        detected_category = real_category or ('image' if ext in ['png', 'jpg', 'jpeg', 'webp'] else 'audio' if ext in ['mp3', 'wav'] else 'document')
-        detected_format = real_format or claimed_format
-        mime_guess, _ = mimetypes.guess_type(file_name)
-
+    # Check 8: Security & Executable Quarantine
+    if real_category == 'executable' or claimed_format in DANGEROUS_EXTENSIONS:
         return {
-            "status": "verified",
-            "valid": True,
+            "status": "security_quarantine",
+            "valid": False,
+            "reason": f"Executable or dangerous script detected ({real_format or claimed_format}). Blocked for security.",
             "file_name": file_name,
-            "category": detected_category,
-            "format": detected_format,
-            "mime_type": mime_guess or f"application/{detected_format}",
-            "size_mb": round(size_mb, 2),
-            "binary_verified": bool(real_format)
+            "claimed_format": claimed_format,
+            "real_format": real_format or claimed_format,
+            "category": "executable",
+            "security_risk": "high",
+            "is_corrupted": is_corrupted,
+            "is_supported": False,
+            "warnings": warnings + ["Executable binary or dangerous script payload"]
         }
 
+    # Check 9: Format Integrity / Truncation checks
+    if real_format == 'pdf':
+        if len(raw_bytes) < 32:
+            is_corrupted = True
+            warnings.append("Truncated PDF: Header too short (< 32 bytes)")
+        elif b'%%EOF' not in raw_bytes[-1024:]:
+            warnings.append("Possible truncated PDF: missing standard %%EOF marker in trailing bytes")
+    elif real_format == 'png':
+        if len(raw_bytes) < 16:
+            is_corrupted = True
+            warnings.append("Truncated PNG header")
+        elif len(raw_bytes) > 100 and b'IEND' not in raw_bytes[-32:]:
+            warnings.append("Possible truncated PNG: missing IEND footer chunk")
+    elif real_format == 'jpeg':
+        if len(raw_bytes) < 8:
+            is_corrupted = True
+            warnings.append("Truncated JPEG header")
+
+    # If corrupted
+    if is_corrupted:
+        return {
+            "status": "corrupted",
+            "valid": False,
+            "reason": "File is structurally damaged or truncated.",
+            "file_name": file_name,
+            "claimed_format": claimed_format,
+            "real_format": real_format or claimed_format,
+            "category": real_category or "unsupported",
+            "size_mb": round(size_mb, 2),
+            "is_empty": False,
+            "is_corrupted": True,
+            "is_supported": False,
+            "security_risk": "low",
+            "warnings": warnings
+        }
+
+    # Check 10: Extension Spoofing / Mismatch Detection
+    if real_format:
+        allowed = COMPATIBILITY_MAP.get(real_format, {real_format})
+        if claimed_format != 'unknown' and claimed_format not in allowed:
+            return {
+                "status": "mismatch_detected",
+                "valid": False,
+                "reason": f"Extension spoofing detected: file claims to be .{claimed_format.upper()}, but binary content is {real_format.upper()}",
+                "file_name": file_name,
+                "claimed_format": claimed_format,
+                "real_format": real_format,
+                "category": real_category,
+                "size_mb": round(size_mb, 2),
+                "is_empty": False,
+                "is_corrupted": False,
+                "is_supported": True,
+                "security_risk": "medium",
+                "warnings": warnings + [f"Mismatched extension .{claimed_format} vs detected {real_format}"]
+            }
+
+    # Final Resolution
+    detected_format = real_format or claimed_format or 'unknown'
+    detected_category = real_category or ('document' if detected_format in ('pdf', 'doc', 'docx', 'txt', 'rtf')
+                                          else 'image' if detected_format in ('png', 'jpg', 'jpeg', 'webp', 'gif', 'svg')
+                                          else 'audio' if detected_format in ('mp3', 'wav', 'flac', 'ogg', 'm4a')
+                                          else 'video' if detected_format in ('mp4', 'webm', 'mov', 'avi')
+                                          else 'tabular' if detected_format in ('csv', 'tsv', 'xlsx', 'xls')
+                                          else 'code' if detected_format in ('json', 'xml', 'html', 'py', 'js')
+                                          else 'archive' if detected_format in ('zip', 'tar', 'gz', '7z', 'rar')
+                                          else 'unsupported')
+
+    mime_guess, _ = mimetypes.guess_type(file_name)
+    final_mime = declared_mime or mime_guess or f"application/{detected_format}"
+    is_supported = detected_category in ('document', 'image', 'tabular', 'audio', 'video', 'code', 'text')
+
     return {
-        "status": "verified",
+        "status": "verified" if is_supported else "unsupported",
+        "valid": is_supported,
+        "file_name": file_name,
+        "category": detected_category,
+        "format": detected_format,
+        "claimed_format": claimed_format,
+        "real_format": real_format or claimed_format,
+        "mime_type": final_mime,
+        "size_bytes": size_bytes or len(raw_bytes),
+        "size_mb": round(size_mb, 3),
+        "is_empty": False,
+        "is_corrupted": False,
+        "is_supported": is_supported,
+        "binary_verified": bool(real_format),
+        "security_risk": "none",
+        "warnings": warnings
+    }
+`,
+  },
+  document_extractor: {
+    id: 'document_extractor',
+    name: 'document_extractor',
+    code: `# Document Extractor
+# Pure function entry: def run(input_data, context=None) -> dict
+
+${MANIFEST_SPEC_GUIDE}
+
+MANIFEST = {
+    "name": "document_extractor",
+    "version": "1.0.0",
+    "description": "Deterministic document parser with hardware safety: extracts text, tables, and page splits from PDF, DOCX, TXT, CSV, and markdown with OCR/Vision escalation triggers.",
+    "inputs": {
+        "document": {
+            "type": "file",
+            "required": True,
+            "description": "Document payload or path (PDF, DOCX, TXT, MD, CSV)"
+        }
+    },
+    "outputs": {
+        "result": {
+            "type": "json",
+            "description": "Extracted document payload with page chunks, text, tables, confidence scoring, and vision/OCR escalation flags"
+        }
+    }
+}
+
+import os
+import io
+import re
+import csv
+import json
+import time
+import zlib
+import base64
+import zipfile
+import xml.etree.ElementTree as ET
+
+MAX_PAGES_LIMIT = 200
+MAX_FILE_SIZE_MB = 50.0
+EXECUTION_TIMEOUT_SECONDS = 30.0
+
+def _safe_clean_text(text):
+    if not text:
+        return ""
+    text = re.sub(r'[\\r\\n]{3,}', '\\n\\n', text)
+    return text.strip()
+
+def _extract_docx(raw_bytes, start_time):
+    paragraphs = []
+    tables = []
+    with io.BytesIO(raw_bytes) as bio:
+        with zipfile.ZipFile(bio, 'r') as zf:
+            if 'word/document.xml' not in zf.namelist():
+                raise ValueError("Corrupted DOCX archive: missing word/document.xml")
+            xml_content = zf.read('word/document.xml')
+            tree = ET.fromstring(xml_content)
+            for p in tree.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'):
+                if time.perf_counter() - start_time > EXECUTION_TIMEOUT_SECONDS:
+                    raise TimeoutError("DOCX parsing exceeded safety hardware timeout.")
+                texts = [node.text for node in p.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t') if node.text]
+                if texts:
+                    p_text = "".join(texts).strip()
+                    if p_text:
+                        paragraphs.append(p_text)
+            for tbl in tree.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl'):
+                tbl_rows = []
+                for tr in tbl.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr'):
+                    row = []
+                    for tc in tr.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc'):
+                        tc_text = "".join(node.text for node in tc.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t') if node.text).strip()
+                        row.append(tc_text)
+                    if any(row):
+                        tbl_rows.append(row)
+                if tbl_rows:
+                    tables.append(tbl_rows)
+    full_text = "\\n\\n".join(paragraphs)
+    return {
+        "text": full_text,
+        "paragraphs_count": len(paragraphs),
+        "tables": tables,
+        "pages_estimate": max(1, round(len(full_text) / 2200))
+    }
+
+def _extract_csv(raw_bytes):
+    try:
+        text_str = raw_bytes.decode('utf-8')
+    except UnicodeDecodeError:
+        text_str = raw_bytes.decode('latin1', errors='ignore')
+    lines = [line.strip() for line in text_str.splitlines() if line.strip()]
+    if not lines:
+        return {"text": "", "columns": [], "rows_count": 0, "preview_rows": []}
+    delimiter = ','
+    for cand in (',', '\\t', ';', '|'):
+        if cand in lines[0] and (len(lines) == 1 or lines[0].count(cand) == lines[1].count(cand)):
+            delimiter = cand
+            break
+    reader = csv.reader(io.StringIO(text_str), delimiter=delimiter)
+    all_rows = list(reader)
+    if not all_rows:
+        return {"text": "", "columns": [], "rows_count": 0, "preview_rows": []}
+    headers = all_rows[0]
+    data_rows = all_rows[1:]
+    preview_table = f"| {' | '.join(headers)} |\\n| {' | '.join(['---'] * len(headers))} |\\n"
+    for r in data_rows[:15]:
+        preview_table += f"| {' | '.join(r[:len(headers)])} |\\n"
+    return {
+        "text": preview_table,
+        "columns": headers,
+        "total_rows": len(data_rows),
+        "delimiter": delimiter
+    }
+
+def _extract_pdf(raw_bytes, start_time):
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
+        total_pages = min(len(reader.pages), MAX_PAGES_LIMIT)
+        pages_data = []
+        full_text = []
+        for idx in range(total_pages):
+            if time.perf_counter() - start_time > EXECUTION_TIMEOUT_SECONDS:
+                break
+            page = reader.pages[idx]
+            page_text = page.extract_text() or ""
+            words = page_text.split()
+            word_count = len(words)
+            img_count = len(page.images) if hasattr(page, 'images') else 0
+            if word_count > 30:
+                conf = 0.95
+                needs_ocr = False
+                page_type = "digital"
+            elif word_count > 0:
+                conf = 0.70
+                needs_ocr = False
+                page_type = "low_density_digital"
+            else:
+                conf = 0.0
+                needs_ocr = True
+                page_type = "scanned"
+            needs_vision = needs_ocr or (img_count > 0)
+            pages_data.append({
+                "page_number": idx + 1,
+                "text": page_text.strip(),
+                "word_count": word_count,
+                "confidence": conf,
+                "needs_ocr": needs_ocr,
+                "needs_vision": needs_vision,
+                "diagrams_count": img_count,
+                "page_type": page_type
+            })
+            if page_text.strip():
+                full_text.append(f"--- Page {idx + 1} ---\\n{page_text.strip()}")
+        return {
+            "total_pages": total_pages,
+            "pages": pages_data,
+            "full_text": "\\n\\n".join(full_text)
+        }
+    except Exception:
+        page_matches = re.findall(rb'/Type\\s*/Page\\b', raw_bytes)
+        estimated_pages = max(1, min(len(page_matches), MAX_PAGES_LIMIT))
+        stream_pattern = re.compile(rb'stream[\\r\\n]+(.*?)[\\r\\n]+endstream', re.DOTALL)
+        streams = stream_pattern.findall(raw_bytes)
+        extracted_chunks = []
+        diagram_count = len(re.findall(rb'/Subtype\\s*/Image\\b', raw_bytes))
+        for s in streams[:300]:
+            if time.perf_counter() - start_time > EXECUTION_TIMEOUT_SECONDS:
+                break
+            decomp = None
+            try:
+                decomp = zlib.decompress(s)
+            except Exception:
+                try:
+                    decomp = zlib.decompress(s, -15)
+                except Exception:
+                    decomp = s
+            if decomp:
+                for bt in re.findall(rb'BT(.*?)ET', decomp, re.DOTALL):
+                    t_literals = re.findall(rb'\\((.*?)\\)\\s*T[jJ]', bt)
+                    for lit in t_literals:
+                        try:
+                            clean_str = lit.decode('latin1', errors='ignore').strip()
+                            if len(clean_str) > 1:
+                                extracted_chunks.append(clean_str)
+                        except Exception:
+                            pass
+        full_text = " ".join(extracted_chunks)
+        word_count = len(full_text.split())
+        if word_count > 50:
+            conf = 0.90
+            needs_ocr = False
+            page_type = "digital"
+        elif word_count > 0:
+            conf = 0.65
+            needs_ocr = True
+            page_type = "mixed"
+        else:
+            conf = 0.0
+            needs_ocr = True
+            page_type = "scanned"
+        needs_vision = needs_ocr or (diagram_count > 0)
+        pages_data = [{
+            "page_number": 1,
+            "text": full_text,
+            "word_count": word_count,
+            "confidence": conf,
+            "needs_ocr": needs_ocr,
+            "needs_vision": needs_vision,
+            "diagrams_count": diagram_count,
+            "page_type": page_type
+        }]
+        return {
+            "total_pages": estimated_pages,
+            "pages": pages_data,
+            "full_text": full_text
+        }
+
+def run(input_data, context=None):
+    start_time = time.perf_counter()
+    doc_info = input_data.get('document') if isinstance(input_data, dict) and 'document' in input_data else input_data
+    if not isinstance(doc_info, dict):
+        return {
+            "status": "failed",
+            "error_type": "InvalidInput",
+            "error_message": "Missing required 'document' payload in input_data",
+            "is_recoverable": False,
+            "confidence": 0.0
+        }
+    file_name = doc_info.get('file_name') or doc_info.get('name') or input_data.get('file_name') or input_data.get('name') or 'unnamed_doc'
+    ext = os.path.splitext(file_name)[1].lower().lstrip('.')
+    size_bytes = doc_info.get('size_bytes') or doc_info.get('size') or input_data.get('size_bytes') or input_data.get('size') or 0
+    b64_data = doc_info.get('file_bytes_b64') or doc_info.get('b64') or input_data.get('file_bytes_b64') or input_data.get('b64') or ''
+    local_path = doc_info.get('file_path') or doc_info.get('local_path') or input_data.get('file_path') or input_data.get('local_path') or ''
+
+    if (size_bytes is not None and size_bytes <= 0) and not b64_data and not (local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0):
+        return {
+            "status": "failed",
+            "error_type": "EmptyFile",
+            "error_message": f"File '{file_name}' is empty (0 bytes). Extraction aborted.",
+            "is_recoverable": False,
+            "confidence": 0.0
+        }
+    size_mb = (size_bytes / (1024 * 1024)) if size_bytes else (len(b64_data) * 3 / 4 / (1024 * 1024))
+    if size_mb > MAX_FILE_SIZE_MB:
+        return {
+            "status": "failed",
+            "error_type": "HardwareLimitExceeded",
+            "error_message": f"Document size ({round(size_mb, 2)}MB) exceeds safety memory limit of {MAX_FILE_SIZE_MB}MB.",
+            "is_recoverable": False,
+            "confidence": 0.0
+        }
+    raw_bytes = doc_info.get('header_bytes') or input_data.get('header_bytes') or b''
+    if not raw_bytes and local_path and os.path.exists(local_path):
+        try:
+            with open(local_path, 'rb') as f:
+                raw_bytes = f.read()
+            size_bytes = len(raw_bytes)
+        except Exception:
+            pass
+
+    if b64_data and not raw_bytes:
+        try:
+            if ',' in b64_data[:60]:
+                b64_data = b64_data.split(',', 1)[1]
+            raw_bytes = base64.b64decode(b64_data)
+        except Exception as e:
+            return {
+                "status": "failed",
+                "error_type": "Base64DecodeError",
+                "error_message": f"Failed to decode base64 file data: {str(e)}",
+                "is_recoverable": False,
+                "confidence": 0.0
+            }
+    try:
+        pages_result = []
+        extracted_text = ""
+        tables = []
+        overall_conf = 1.0
+        needs_vision = False
+        scanned_pages = []
+        diagram_pages = []
+        total_pages = 1
+        if ext == 'docx':
+            res = _extract_docx(raw_bytes, start_time)
+            extracted_text = res["text"]
+            tables = res["tables"]
+            total_pages = res["pages_estimate"]
+            overall_conf = 0.98 if extracted_text else 0.0
+            pages_result = [{
+                "page_number": 1,
+                "text": extracted_text,
+                "confidence": overall_conf,
+                "needs_ocr": False,
+                "needs_vision": False,
+                "diagrams_count": 0,
+                "page_type": "digital"
+            }]
+        elif ext in ('csv', 'tsv'):
+            res = _extract_csv(raw_bytes)
+            extracted_text = res["text"]
+            overall_conf = 1.0
+            pages_result = [{
+                "page_number": 1,
+                "text": extracted_text,
+                "confidence": 1.0,
+                "needs_ocr": False,
+                "needs_vision": False,
+                "diagrams_count": 0,
+                "page_type": "tabular"
+            }]
+        elif ext == 'pdf':
+            res = _extract_pdf(raw_bytes, start_time)
+            extracted_text = res["full_text"]
+            pages_result = res["pages"]
+            total_pages = res["total_pages"]
+            for p in pages_result:
+                if p["needs_ocr"] or p["confidence"] < 0.70:
+                    scanned_pages.append(p["page_number"])
+                if p["diagrams_count"] > 0:
+                    diagram_pages.append(p["page_number"])
+            needs_vision = bool(scanned_pages or diagram_pages)
+            overall_conf = round(sum(p["confidence"] for p in pages_result) / len(pages_result), 2) if pages_result else 0.0
+        else:
+            try:
+                extracted_text = raw_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                extracted_text = raw_bytes.decode('latin1', errors='ignore')
+            overall_conf = 1.0 if extracted_text.strip() else 0.0
+            pages_result = [{
+                "page_number": 1,
+                "text": extracted_text,
+                "confidence": overall_conf,
+                "needs_ocr": False,
+                "needs_vision": False,
+                "diagrams_count": 0,
+                "page_type": "text"
+            }]
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        return {
+            "status": "success",
+            "document_name": file_name,
+            "format": ext or "text",
+            "total_pages": total_pages,
+            "extracted_text": _safe_clean_text(extracted_text),
+            "character_count": len(extracted_text),
+            "word_count": len(extracted_text.split()),
+            "overall_confidence": overall_conf,
+            "pages": pages_result,
+            "tables": tables,
+            "escalation": {
+                "needs_vision_model": needs_vision,
+                "scanned_pages": scanned_pages,
+                "diagram_pages": diagram_pages,
+                "low_confidence": overall_conf < 0.70
+            },
+            "hardware_metrics": {
+                "duration_ms": duration_ms,
+                "memory_safe": True,
+                "truncated": False
+            }
+        }
+    except TimeoutError as te:
+        return {
+            "status": "failed",
+            "error_type": "ExecutionTimeout",
+            "error_message": str(te),
+            "is_recoverable": True,
+            "confidence": 0.0
+        }
+    except Exception as e:
+        return {
+            "status": "failed",
+            "error_type": e.__class__.__name__,
+            "error_message": f"Extraction failure: {str(e)}",
+            "is_recoverable": False,
+            "confidence": 0.0
+        }
+`,
+  },
+  node_context_builder: {
+    id: 'node_context_builder',
+    name: 'node_context_builder',
+    code: `# node_context_builder
+# Pure function entry: def run(input_data, context=None) -> dict
+
+${MANIFEST_SPEC_GUIDE}
+
+MANIFEST = {
+    "name": "node_context_builder",
+    "version": "1.0.0",
+    "description": "Prepares structured comparison context from two exploration nodes for AI relationship synthesis and thread validation.",
+    "inputs": {
+        "node_pair": {
+            "type": "json",
+            "required": True,
+            "description": "Pair payload containing source_node, target_node, and exploration_id"
+        }
+    },
+    "outputs": {
+        "comparison_context": {
+            "type": "json",
+            "description": "Sanitized semantic context, keywords, and comparison prompt ready for Muse Spark evaluation"
+        }
+    }
+}
+
+import re
+import json
+
+def sanitize_text(text) -> str:
+    if not text:
+        return ""
+    clean = re.sub(r'\\s+', ' ', str(text)).strip()
+    return clean[:2000]
+
+def extract_node_summary(node) -> dict:
+    if not isinstance(node, dict):
+        return {"id": "unknown", "title": "Unknown", "description": "", "type": "unknown"}
+    
+    metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+    return {
+        "id": str(node.get("id") or node.get("node_id") or "unknown"),
+        "title": sanitize_text(node.get("title") or node.get("name") or "Untitled Node"),
+        "description": sanitize_text(node.get("description") or node.get("content") or ""),
+        "type": str(node.get("type") or "finding").lower(),
+        "status": str(node.get("status") or "proposed"),
+        "category": str(node.get("category") or "info"),
+        "source_doc": metadata.get("source_document") or node.get("sourceDoc") or None
+    }
+
+def run(input_data, context=None) -> dict:
+    """
+    Pure engine entry point:
+    Validates source and target nodes, filters out raw binary files,
+    and constructs a normalized comparison package for the AI model.
+    """
+    if not isinstance(input_data, dict):
+        return {
+            "status": "error",
+            "error": "input_data must be a dictionary with source_node and target_node",
+            "valid": False
+        }
+
+    source_raw = input_data.get("source_node") or {}
+    target_raw = input_data.get("target_node") or {}
+    exploration_id = input_data.get("exploration_id") or "exploration_01"
+
+    source = extract_node_summary(source_raw)
+    target = extract_node_summary(target_raw)
+
+    # Rejection rule: raw unextracted file resources cannot be connected directly by user
+    invalid_types = {"document", "resource", "file"}
+    if source["type"] in invalid_types or target["type"] in invalid_types:
+        return {
+            "status": "rejected",
+            "valid": False,
+            "reason": "Direct connections between raw unextracted files are not supported. Extract knowledge nodes first.",
+            "source": source,
+            "target": target
+        }
+
+    words_a = set(re.findall(r'\\b[a-zA-Z]{4,}\\b', (source["title"] + " " + source["description"]).lower()))
+    words_b = set(re.findall(r'\\b[a-zA-Z]{4,}\\b', (target["title"] + " " + target["description"]).lower()))
+    stop_words = {"this", "that", "with", "from", "have", "were", "what", "when", "where", "which", "there", "their"}
+    shared_keywords = sorted(list((words_a & words_b) - stop_words))[:8]
+
+    return {
+        "status": "success",
         "valid": True,
-        "input_type": "text",
-        "content": str(input_data)[:200]
+        "exploration_id": exploration_id,
+        "source_node": source,
+        "target_node": target,
+        "shared_keywords": shared_keywords,
+        "prompt_instruction": (
+            f"Analyze the relationship between Node A and Node B:\\n"
+            f"- Node A ({source['type'].upper()}): \\"{source['title']}\\" -> {source['description']}\\n"
+            f"- Node B ({target['type'].upper()}): \\"{target['title']}\\" -> {target['description']}\\n"
+            f"Determine if a valid logical, supportive, contradictory, or causal connection exists. "
+            f"Return a JSON object with: {{\\"connected\\": true/false, \\"relationship\\": \\"supports|contradicts|elaborates|correlates|none\\", "
+            f"\\"label\\": \\"Short 3-5 word relationship summary\\", \\"explanation\\": \\"One sentence explaining why\\"}}"
+        )
     }
 `,
   },
 };
 
-const getEngineInitialCode = (engineId, enginesData) => {
+// Safe client-side parser for Python MANIFEST dictionary
+function extractManifest(code = '') {
+  if (!code) return null;
+  const match = code.match(/MANIFEST\s*=\s*(\{[\s\S]*?\n\})/);
+  if (!match) return null;
+  try {
+    const raw = match[1];
+    let s = raw
+      .replace(/#.*$/gm, '')
+      .replace(/\bTrue\b/g, 'true')
+      .replace(/\bFalse\b/g, 'false')
+      .replace(/\bNone\b/g, 'null')
+      .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"')
+      .replace(/,\s*([}\]])/g, '$1');
+    const parsed = JSON.parse(s);
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+  } catch (err) {
+    // In-progress syntax while user is typing
+  }
+  return null;
+}
+
+const isFileModality = (type) =>
+  ['file', 'image', 'audio', 'video', 'document', 'pdf'].includes(String(type || '').toLowerCase());
+
+export const getEngineInitialCode = (engineId, enginesData) => {
+  const readableName = (engineId || 'engine').replace(/_/g, ' ');
+
   if (enginesData?.[engineId]?.code) {
-    if (engineId === 'file_detection' && !enginesData[engineId].code.includes('file_bytes_b64')) {
+    const existing = enginesData[engineId].code;
+    if (engineId === 'file_detection' && (!existing.includes('MAGIC_SIGNATURES') || existing.includes('File Detection Engine') || existing.includes('engine 03') || existing.includes('engine_03') || existing.includes('"version": "1.0.0"') || existing.includes('ROUTING_MAP') || !existing.includes('COMPATIBILITY_MAP'))) {
       return DEFAULT_ENGINES.file_detection.code;
     }
-    return enginesData[engineId].code;
+    if (!existing.includes('MANIFEST')) {
+      const defaultManifest = `${MANIFEST_SPEC_GUIDE}
+
+MANIFEST = {
+    "name": "${readableName}",
+    "version": "1.0.0",
+    "description": "Custom processing engine",
+    "inputs": {
+        "text": {
+            "type": "text",
+            "required": True,
+            "description": "Input text or query to process"
+        }
+    },
+    "outputs": {
+        "result": {
+            "type": "json",
+            "description": "Processed output data"
+        }
+    }
+}
+
+`;
+      return defaultManifest + existing;
+    }
+    return existing;
+  }
+
+  if (engineId === 'resource_bridge') {
+    return DEFAULT_ENGINES.resource_bridge.code;
   }
   if (engineId === 'file_detection') {
     return DEFAULT_ENGINES.file_detection.code;
   }
+  if (engineId === 'document_extractor') {
+    return DEFAULT_ENGINES.document_extractor.code;
+  }
+  if (engineId === 'node_context_builder') {
+    return DEFAULT_ENGINES.node_context_builder.code;
+  }
+
   return `# ${engineId}
 # Pure function entry: def run(input_data, context=None) -> dict
+
+${MANIFEST_SPEC_GUIDE}
+
+MANIFEST = {
+    "name": "${readableName}",
+    "version": "1.0.0",
+    "description": "Custom processing engine",
+    "inputs": {
+        "text": {
+            "type": "text",
+            "required": True,
+            "description": "Input text or query to process"
+        }
+    },
+    "outputs": {
+        "result": {
+            "type": "json",
+            "description": "Processed output data"
+        }
+    }
+}
 
 def run(input_data, context=None):
     """
     ${engineId} processing logic.
     """
+    text = input_data.get("text", "") if isinstance(input_data, dict) else str(input_data)
     return {
         "status": "success",
         "engine": "${engineId}",
-        "output": input_data
+        "output": text
     }
 `;
 };
@@ -229,7 +1333,8 @@ function inspectPythonEngine(code = '') {
 }
 
 function renderModalityIcon(type, titlePrefix = '') {
-  switch (type) {
+  const norm = String(type || '').toLowerCase();
+  switch (norm) {
     case 'text':
       return (
         <svg
@@ -248,7 +1353,98 @@ function renderModalityIcon(type, titlePrefix = '') {
           <line x1="12" y1="4" x2="12" y2="20" />
         </svg>
       );
+    case 'image':
+      return (
+        <svg
+          key={type}
+          className="engine-mod-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          title={`${titlePrefix}Image`}
+        >
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <polyline points="21 15 16 10 5 21" />
+        </svg>
+      );
+    case 'audio':
+      return (
+        <svg
+          key={type}
+          className="engine-mod-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          title={`${titlePrefix}Audio`}
+        >
+          <path d="M9 18V5l12-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="16" r="3" />
+        </svg>
+      );
+    case 'video':
+      return (
+        <svg
+          key={type}
+          className="engine-mod-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          title={`${titlePrefix}Video`}
+        >
+          <polygon points="23 7 16 12 23 17 23 7" />
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+        </svg>
+      );
+    case 'number':
+      return (
+        <svg
+          key={type}
+          className="engine-mod-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          title={`${titlePrefix}Number`}
+        >
+          <line x1="4" y1="9" x2="20" y2="9" />
+          <line x1="4" y1="15" x2="20" y2="15" />
+          <line x1="10" y1="3" x2="8" y2="21" />
+          <line x1="16" y1="3" x2="14" y2="21" />
+        </svg>
+      );
+    case 'boolean':
+      return (
+        <svg
+          key={type}
+          className="engine-mod-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          title={`${titlePrefix}Boolean`}
+        >
+          <rect x="1" y="5" width="22" height="14" rx="7" ry="7" />
+          <circle cx="16" cy="12" r="3" />
+        </svg>
+      );
     case 'file':
+    case 'document':
+    case 'pdf':
       return (
         <svg
           key={type}
@@ -292,9 +1488,13 @@ function renderModalityIcon(type, titlePrefix = '') {
 const SERVER_PY_TEMPLATE = `#!/usr/bin/env python3
 import sys
 import os
+import io
+import re
 import json
 import time
 import base64
+import struct
+import zipfile
 import mimetypes
 import traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -341,19 +1541,29 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 code = data.get("code", "")
                 input_data = data.get("input_data", {})
 
-                if isinstance(input_data, dict) and "file_bytes_b64" in input_data:
-                    raw_b64 = input_data["file_bytes_b64"]
-                    try:
-                        header_bytes = base64.b64decode(raw_b64[:128])
-                        input_data["header_bytes"] = header_bytes
-                    except Exception:
-                        pass
+                if isinstance(input_data, dict):
+                    for k, v in list(input_data.items()):
+                        if isinstance(v, dict) and "file_bytes_b64" in v:
+                            try:
+                                v["header_bytes"] = base64.b64decode(v["file_bytes_b64"][:256])
+                            except Exception:
+                                pass
+                    if "file_bytes_b64" in input_data:
+                        try:
+                            input_data["header_bytes"] = base64.b64decode(input_data["file_bytes_b64"][:256])
+                        except Exception:
+                            pass
 
                 exec_scope = {
                     "__name__": "__main__",
                     "os": os,
                     "sys": sys,
+                    "io": io,
+                    "re": re,
                     "json": json,
+                    "base64": base64,
+                    "struct": struct,
+                    "zipfile": zipfile,
                     "mimetypes": mimetypes,
                 }
 
@@ -362,6 +1572,18 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 if "run" not in exec_scope or not callable(exec_scope["run"]):
                     raise ValueError("The engine script must define an entry function: def run(input_data, context=None)")
 
+                # Strict Contract Validation against MANIFEST if declared
+                manifest = exec_scope.get("MANIFEST")
+                if isinstance(manifest, dict) and "inputs" in manifest and isinstance(manifest["inputs"], dict):
+                    for port_name, port_spec in manifest["inputs"].items():
+                        if isinstance(port_spec, dict) and port_spec.get("required"):
+                            val = input_data.get(port_name) if isinstance(input_data, dict) else None
+                            # Backward compatible fallback for flat single file/media payloads
+                            if val is None and port_name in ["file", "document", "image", "audio", "video"] and isinstance(input_data, dict) and "file_name" in input_data:
+                                val = input_data
+                            if val is None or val == "":
+                                raise ValueError(f"Missing required input '{port_name}' ({port_spec.get('type', 'any')})")
+
                 output = exec_scope["run"](input_data)
                 duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
@@ -369,6 +1591,7 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 res = {
                     "status": "success",
                     "output": output,
+                    "manifest": manifest if isinstance(manifest, dict) else None,
                     "duration_ms": duration_ms,
                     "server": "local-python",
                 }
@@ -410,20 +1633,25 @@ if __name__ == "__main__":
 `;
 
 export default function EnginesPage({
-  engines = ['file_detection'],
+  engines = ['file_detection', 'document_extractor'],
   currentEngine = 'file_detection',
   enginesData = {},
   onSelectEngine,
   onUpdateEngineCode,
+  onDeleteEngine,
 }) {
   const activeEngineId = currentEngine || 'file_detection';
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [editorCode, setEditorCode] = useState(() =>
     getEngineInitialCode(activeEngineId, enginesData)
   );
 
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [rawTextInput, setRawTextInput] = useState('Sample research text for extraction analysis.');
-  const [rawJsonInput, setRawJsonInput] = useState('{\\n  "query": "analyze findings",\\n  "threshold": 0.8\\n}');
+  const [inputFiles, setInputFiles] = useState({});
+  const [inputValues, setInputValues] = useState({
+    text: 'Sample research text for extraction analysis.',
+  });
+  const [validationError, setValidationError] = useState(null);
+  const [dragOverPort, setDragOverPort] = useState(null);
   const [simOutput, setSimOutput] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [serverStatus, setServerStatus] = useState('checking'); // 'online' | 'offline' | 'checking'
@@ -431,11 +1659,34 @@ export default function EnginesPage({
   const [copiedCmd, setCopiedCmd] = useState(false);
   const [downloadedServer, setDownloadedServer] = useState(false);
 
-  const fileInputRef = useRef(null);
-
   // Statically inspect the current Python code
   const inspection = useMemo(() => inspectPythonEngine(editorCode), [editorCode]);
-  const effectiveInputType = inspection.inferredInput;
+
+  // Parse declarative MANIFEST contract or fallback
+  const manifest = useMemo(() => {
+    const parsed = extractManifest(editorCode);
+    if (parsed && parsed.inputs && parsed.outputs) {
+      return parsed;
+    }
+    return {
+      name: activeEngineId,
+      version: '1.0.0',
+      inputs: {
+        [inspection.inferredInput === 'file' ? 'file' : 'input']: {
+          type: inspection.inferredInput,
+          required: true,
+        },
+      },
+      outputs: {
+        result: {
+          type: inspection.inferredOutput,
+        },
+      },
+    };
+  }, [editorCode, activeEngineId, inspection]);
+
+  const manifestInputs = manifest.inputs || {};
+  const manifestOutputs = manifest.outputs || {};
 
   // Detect if engine returned a file object
   const fileOutput = useMemo(() => {
@@ -529,15 +1780,24 @@ export default function EnginesPage({
     };
   }, []);
 
-  // Sync editor when active engine changes
+  // Sync editor only when active engine changes (not on every typing update)
+  const prevEngineIdRef = useRef(activeEngineId);
   useEffect(() => {
-    const code = getEngineInitialCode(activeEngineId, enginesData);
-    setEditorCode(code);
-    setSimOutput(null);
-    if (activeEngineId === 'file_detection' && enginesData?.['file_detection']?.code !== code) {
-      onUpdateEngineCode?.('file_detection', code);
+    if (prevEngineIdRef.current !== activeEngineId) {
+      prevEngineIdRef.current = activeEngineId;
+      const code = getEngineInitialCode(activeEngineId, enginesData);
+      setEditorCode(code);
+      setSimOutput(null);
+      setValidationError(null);
     }
-  }, [activeEngineId, enginesData]);
+    // Auto-sync upgraded default file_detection code if outdated
+    if (activeEngineId === 'file_detection') {
+      const canonicalCode = getEngineInitialCode('file_detection', enginesData);
+      if (enginesData?.file_detection?.code !== canonicalCode) {
+        onUpdateEngineCode?.('file_detection', canonicalCode);
+      }
+    }
+  }, [activeEngineId]);
 
   const handleCodeChange = (e) => {
     const val = e.target.value;
@@ -545,62 +1805,77 @@ export default function EnginesPage({
     onUpdateEngineCode?.(activeEngineId, val);
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadedFile(file);
-    setSimOutput(null);
-  };
-
   const runSimulation = async () => {
-    setIsSimulating(true);
+    setValidationError(null);
 
-    // Prepare payload based on effective input type
-    let inputPayload = null;
-
-    if (effectiveInputType === 'file') {
-      if (!uploadedFile) {
-        setSimOutput({
-          error: 'No file selected. Please click or drop a file above to test.',
-        });
-        setIsSimulating(false);
-        return;
-      }
-
-      inputPayload = {
-        file_name: uploadedFile.name,
-        name: uploadedFile.name,
-        size_bytes: uploadedFile.size,
-        mime_type: uploadedFile.type || 'application/octet-stream',
-      };
-
-      try {
-        const slice = uploadedFile.slice(0, 64);
-        const buf = await slice.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        let binaryStr = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binaryStr += String.fromCharCode(bytes[i]);
+    // 1. Strict Contract Validation: verify every required input has a value
+    for (const [portKey, portSpec] of Object.entries(manifestInputs)) {
+      if (portSpec && portSpec.required) {
+        if (isFileModality(portSpec.type)) {
+          if (!inputFiles[portKey]) {
+            setValidationError({ field: portKey, message: `Missing required input "${portKey}"` });
+            setSimOutput({ error: `Validation Error: Missing required input "${portKey}" (type: ${portSpec.type || 'file'})` });
+            return;
+          }
+        } else {
+          const val = inputValues[portKey];
+          if (val === undefined || val === null || String(val).trim() === '') {
+            setValidationError({ field: portKey, message: `Missing required input "${portKey}"` });
+            setSimOutput({ error: `Validation Error: Missing required input "${portKey}" (type: ${portSpec.type || 'text'})` });
+            return;
+          }
         }
-        inputPayload.file_bytes_b64 = btoa(binaryStr);
-      } catch (err) {
-        console.warn('Could not read binary slice:', err);
-      }
-    } else if (effectiveInputType === 'text') {
-      inputPayload = {
-        text: rawTextInput,
-        content: rawTextInput,
-      };
-    } else {
-      try {
-        inputPayload = JSON.parse(rawJsonInput);
-      } catch {
-        inputPayload = { raw: rawJsonInput };
       }
     }
 
-    // Execute via local Python server
+    setIsSimulating(true);
+
     try {
+      // 2. Build multi-port input payload
+      const inputPayload = {};
+      for (const [portKey, portSpec] of Object.entries(manifestInputs)) {
+        const pType = String(portSpec.type || 'text').toLowerCase();
+        if (isFileModality(pType)) {
+          const file = inputFiles[portKey];
+          if (file) {
+            const buf = await file.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            let binaryStr = '';
+            const readLen = Math.min(bytes.length, 512 * 1024);
+            for (let i = 0; i < readLen; i++) {
+              binaryStr += String.fromCharCode(bytes[i]);
+            }
+            const fileObj = {
+              file_name: file.name,
+              name: file.name,
+              size_bytes: file.size,
+              mime_type: file.type || 'application/octet-stream',
+              file_bytes_b64: btoa(binaryStr),
+              modality: pType,
+            };
+            inputPayload[portKey] = fileObj;
+            inputPayload.file_name = file.name;
+            inputPayload.size_bytes = file.size;
+            inputPayload.file_bytes_b64 = btoa(binaryStr);
+          }
+        } else if (pType === 'json') {
+          const raw = inputValues[portKey] || '';
+          try {
+            inputPayload[portKey] = JSON.parse(raw);
+          } catch {
+            inputPayload[portKey] = raw;
+          }
+        } else if (pType === 'number') {
+          const raw = inputValues[portKey];
+          inputPayload[portKey] = raw === '' || isNaN(Number(raw)) ? 0 : Number(raw);
+        } else if (pType === 'boolean') {
+          const raw = inputValues[portKey];
+          inputPayload[portKey] = raw === true || raw === 'true';
+        } else {
+          inputPayload[portKey] = inputValues[portKey] ?? '';
+        }
+      }
+
       const res = await fetch('http://127.0.0.1:8001/api/engines/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -655,8 +1930,19 @@ export default function EnginesPage({
         {/* Left side empty for fixed top breadcrumbs capsule */}
         <div />
 
-        {/* Right side: Server status pill + Save button */}
+        {/* Right side: Delete button + Server status pill */}
         <div className="engines-top-right">
+          {!['file_detection', 'document_extractor', 'node_context_builder'].includes(activeEngineId) && onDeleteEngine && (
+            <button
+              type="button"
+              className="engine-top-delete-btn"
+              onClick={() => setShowDeleteModal(true)}
+              title={`Delete engine ${activeEngineId}`}
+            >
+              Delete Engine
+            </button>
+          )}
+
           <div
             className="engine-server-pill-wrap"
             onMouseEnter={handleMouseEnter}
@@ -726,88 +2012,191 @@ export default function EnginesPage({
               </div>
             )}
           </div>
-
-          <button
-            type="button"
-            className="engine-save-btn"
-            onClick={() => onUpdateEngineCode?.(activeEngineId, editorCode)}
-          >
-            Save
-          </button>
         </div>
       </div>
 
       {/* Main Split Grid */}
       <div className="engines-workspace-grid">
-        {/* Left: Clean White Python Code Editor */}
+        {/* Left: CodeMirror 6 Python Code Editor */}
         <div className="engine-code-card">
-          <textarea
-            className="engine-code-area"
+          <EngineCodeEditor
             value={editorCode}
-            onChange={handleCodeChange}
-            spellCheck="false"
-            placeholder="Write Python engine code here..."
+            onChange={(val) => {
+              setEditorCode(val);
+              onUpdateEngineCode?.(activeEngineId, val);
+            }}
           />
         </div>
 
-        {/* Right: Universal Simulation with Inferred Input */}
+        {/* Right: Universal Testing with Multi-Port Arrow Pill */}
         <div className="engine-sim-card">
           <div className="engine-sim-header">
-            <span className="engine-sim-title">Simulation</span>
-            <div
-              className="engine-io-pill"
-            >
+            <span className="engine-sim-title">Testing</span>
+            <div className="engine-io-pill">
               <div className="engine-mod-group">
-                {renderModalityIcon(effectiveInputType, 'Input: ')}
+                {Object.entries(manifestInputs).map(([portKey, portSpec]) => (
+                  <span
+                    key={portKey}
+                    className="engine-port-tag"
+                    title={`${portKey} (${portSpec.type || 'text'})${portSpec.required ? ' *required' : ''}`}
+                  >
+                    {renderModalityIcon(portSpec.type || 'text')}
+                  </span>
+                ))}
               </div>
               <span className="engine-mod-arrow">→</span>
               <div className="engine-mod-group">
-                {renderModalityIcon(fileOutput ? 'file' : inspection.inferredOutput, 'Output: ')}
+                {Object.entries(manifestOutputs).map(([portKey, portSpec]) => (
+                  <span
+                    key={portKey}
+                    className="engine-port-tag"
+                    title={`${portKey} (${portSpec.type || 'json'})`}
+                  >
+                    {renderModalityIcon(fileOutput ? 'file' : portSpec.type || 'json')}
+                  </span>
+                ))}
               </div>
             </div>
           </div>
 
           <div className="engine-sim-body">
-            {/* Dynamically Inferred Input based on static code inspection */}
-            {effectiveInputType === 'file' ? (
-              <div
-                className="engine-upload-box"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden-file-input"
-                  onChange={handleFileUpload}
-                />
-                {uploadedFile ? (
-                  <div className="engine-file-selected">
-                    <span className="engine-file-name">{uploadedFile.name}</span>
-                    <span className="engine-file-size">
-                      {(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB
-                    </span>
+
+            {/* Dynamic Input Form for each declared port */}
+            <div className="engine-inputs-form">
+              {Object.entries(manifestInputs).map(([portKey, portSpec]) => {
+                const isRequired = !!portSpec.required;
+                const portType = portSpec.type || 'text';
+                const fileForPort = inputFiles[portKey];
+                const valueForPort = inputValues[portKey] || '';
+                const isFieldErr = validationError?.field === portKey;
+
+                const isFile = isFileModality(portType);
+
+                return (
+                  <div key={portKey} className="engine-field-group">
+                    <div className="engine-field-label-row">
+                      <span className="engine-field-name">{portKey}</span>
+                      <span className={`engine-field-req-tag ${isRequired ? 'required' : 'optional'}`}>
+                        {isRequired ? 'Required *' : 'Optional'}
+                      </span>
+                    </div>
+
+                    {isFile ? (
+                      <div
+                        className={`engine-upload-box ${isFieldErr ? 'has-error' : ''} ${dragOverPort === portKey ? 'is-drag-over' : ''}`}
+                        onClick={() => {
+                          const input = document.getElementById(`file-input-${portKey}`);
+                          input?.click();
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDragOverPort(portKey);
+                        }}
+                        onDragLeave={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (dragOverPort === portKey) setDragOverPort(null);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDragOverPort(null);
+                          const file = e.dataTransfer?.files?.[0];
+                          if (file) {
+                            setInputFiles((prev) => ({ ...prev, [portKey]: file }));
+                            setValidationError(null);
+                            setSimOutput(null);
+                          }
+                        }}
+                      >
+                        <input
+                          id={`file-input-${portKey}`}
+                          type="file"
+                          accept={
+                            portType === 'image'
+                              ? 'image/*'
+                              : portType === 'audio'
+                              ? 'audio/*'
+                              : portType === 'video'
+                              ? 'video/*'
+                              : portType === 'pdf'
+                              ? '.pdf'
+                              : '*/*'
+                          }
+                          className="hidden-file-input"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setInputFiles((prev) => ({ ...prev, [portKey]: file }));
+                              setValidationError(null);
+                              setSimOutput(null);
+                            }
+                          }}
+                        />
+                        {fileForPort ? (
+                          <div className="engine-file-selected">
+                            <div className="engine-file-selected-row">
+                              {renderModalityIcon(portType)}
+                              <span className="engine-file-name">{fileForPort.name}</span>
+                            </div>
+                            <span className="engine-file-size">
+                              {(fileForPort.size / (1024 * 1024)).toFixed(2)} MB &bull; {fileForPort.type || portType}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="engine-upload-placeholder-wrap">
+                            {renderModalityIcon(portType)}
+                            <span className="engine-upload-prompt">
+                              Click or drop {portType === 'image' ? 'image' : portType === 'audio' ? 'audio' : 'file'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    ) : portType === 'number' ? (
+                      <input
+                        type="number"
+                        className={`engine-sim-single-input ${isFieldErr ? 'has-error' : ''}`}
+                        placeholder="Enter number..."
+                        value={valueForPort}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setInputValues((prev) => ({ ...prev, [portKey]: val }));
+                          setValidationError(null);
+                          setSimOutput(null);
+                        }}
+                      />
+                    ) : portType === 'boolean' ? (
+                      <select
+                        className={`engine-sim-select ${isFieldErr ? 'has-error' : ''}`}
+                        value={valueForPort === '' ? 'false' : String(valueForPort)}
+                        onChange={(e) => {
+                          const val = e.target.value === 'true';
+                          setInputValues((prev) => ({ ...prev, [portKey]: val }));
+                          setValidationError(null);
+                          setSimOutput(null);
+                        }}
+                      >
+                        <option value="true">True</option>
+                        <option value="false">False</option>
+                      </select>
+                    ) : (
+                      <textarea
+                        className={`engine-sim-text-input ${isFieldErr ? 'has-error' : ''}`}
+                        placeholder={portType === 'json' ? 'Enter JSON...' : 'Enter text...'}
+                        value={valueForPort}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setInputValues((prev) => ({ ...prev, [portKey]: val }));
+                          setValidationError(null);
+                          setSimOutput(null);
+                        }}
+                      />
+                    )}
                   </div>
-                ) : (
-                  <span className="engine-upload-prompt">
-                    Click or drop a file to test
-                  </span>
-                )}
-              </div>
-            ) : effectiveInputType === 'text' ? (
-              <textarea
-                className="engine-sim-text-input"
-                placeholder="Enter text input to test..."
-                value={rawTextInput}
-                onChange={(e) => setRawTextInput(e.target.value)}
-              />
-            ) : (
-              <textarea
-                className="engine-sim-json-input"
-                placeholder='Enter JSON input, e.g. {"key": "val"}...'
-                value={rawJsonInput}
-                onChange={(e) => setRawJsonInput(e.target.value)}
-              />
-            )}
+                );
+              })}
+            </div>
 
             {/* Run Button */}
             <button
@@ -866,6 +2255,37 @@ export default function EnginesPage({
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="engine-modal-backdrop" onClick={() => setShowDeleteModal(false)}>
+          <div className="engine-modal-card" onClick={(e) => e.stopPropagation()}>
+            <h4 className="engine-modal-title">Delete Engine</h4>
+            <p className="engine-modal-desc">
+              Are you sure you want to delete <code className="engine-modal-code">{activeEngineId}</code>? This engine will be permanently removed.
+            </p>
+            <div className="engine-modal-actions">
+              <button
+                type="button"
+                className="engine-modal-btn-cancel"
+                onClick={() => setShowDeleteModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="engine-modal-btn-delete"
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  onDeleteEngine?.(activeEngineId);
+                }}
+              >
+                Delete Engine
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

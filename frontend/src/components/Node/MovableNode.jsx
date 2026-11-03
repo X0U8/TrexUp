@@ -8,14 +8,23 @@ export default function MovableNode({
   width = 280,
   zoom = 1,
   data = {},
+  isSelected = false,
+  onDragStart,
   onMove,
+  onDragEnd,
   onClick,
+  onPortStart,
+  onPortEnd,
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, initialX: 0, initialY: 0 });
   const hasMovedRef = useRef(false);
 
   const handlePointerDown = (e) => {
+    // If clicking a port, do not drag the node
+    if (e.target.closest('.exp-port')) {
+      return;
+    }
     e.stopPropagation();
     hasMovedRef.current = false;
     setIsDragging(true);
@@ -25,6 +34,7 @@ export default function MovableNode({
       initialX: x,
       initialY: y,
     };
+    onDragStart?.(id);
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
@@ -43,8 +53,9 @@ export default function MovableNode({
   const handlePointerUp = (e) => {
     setIsDragging(false);
     e.currentTarget.releasePointerCapture?.(e.pointerId);
+    onDragEnd?.(id);
 
-    // If not dragged, treat as click to open modal
+    // If not dragged, treat as click to open modal or select
     if (!hasMovedRef.current) {
       onClick?.();
     }
@@ -61,45 +72,100 @@ export default function MovableNode({
   const displayName = (data.title || data.name || (isResource ? 'Untitled Document' : 'Untitled Node')).replace(/\.node$/i, '');
   const status = data.status || (isResource ? 'not checked' : 'proposed');
   const isUploading = Boolean(data.uploading);
+  const isExtracting = Boolean(data.extracting) || status === 'extracting';
+  const isLoading = isUploading || isExtracting;
+
+  const getResolvedWidth = (type, isRes) => {
+    if (isRes || type === 'document' || type === 'resource') return 275;
+    if (type === 'subtopic') return 150;
+    if (type === 'evidence') return 170;
+    if (type === 'topic') return 190;
+    return 185;
+  };
+
+  const resolvedWidth = getResolvedWidth(rawType, isResource);
+
+  const nodeTitle = isUploading
+    ? 'Uploading to Cloudinary...'
+    : isExtracting
+      ? 'Extracting knowledge...'
+      : 'Click to inspect node';
 
   return (
     <div
-      className={`movable-node ${isResource ? 'resource-node' : 'info-node'} type-${rawType} ${isDragging ? 'dragging' : ''}`}
+      className={`movable-node ${isResource ? 'resource-node' : 'info-node'} type-${rawType} ${isDragging ? 'dragging' : ''} ${isSelected ? 'selected-tree-node' : ''}`}
+      data-node-id={id}
       style={{
-        width: `${width}px`,
+        width: `${resolvedWidth}px`,
         transform: `translate3d(${x}px, ${y}px, 0)`,
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      title={isUploading ? 'Uploading to Cloudinary...' : 'Click to inspect node'}
+      title={nodeTitle}
     >
       <div className="node-content">
         <div className="node-title-row">
           <span className="node-filename">{displayName}</span>
-          {isUploading && <div className="node-spinner" title="Uploading..." />}
+          {isLoading && (
+            <div
+              className="node-spinner"
+              title={isUploading ? 'Uploading...' : 'Extracting...'}
+            />
+          )}
         </div>
 
         <div className="node-badges-row">
           {isResource ? (
             <>
-              <span className="node-category-tag resource">Resource</span>
-              <span className={`node-status-badge ${isUploading ? 'uploading' : ''}`}>
-                {isUploading ? 'uploading...' : status}
+              <span className="node-category-tag resource">
+                <span className="node-type-dot" />
+                <span>Resource</span>
               </span>
+              {isUploading ? (
+                <span className="node-status-badge uploading">uploading...</span>
+              ) : isExtracting ? (
+                <span className="node-status-badge extracting">extracting...</span>
+              ) : null}
             </>
           ) : (
-            <>
-              <span className={`node-category-tag info ${rawType}`}>
-                {rawType.replace('_', ' ')}
-              </span>
-              <span className="node-status-badge info">
-                {status}
-              </span>
-            </>
+            <span className={`node-category-tag info ${rawType}`}>
+              <span className="node-type-dot" />
+              <span>{rawType.replace('_', ' ')}</span>
+            </span>
           )}
         </div>
       </div>
+
+      {/* Two side connection dots for extracted nodes only (iron ore raw resources have no ports) */}
+      {!isResource && (
+        <>
+          <div
+            className="exp-port left"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onPortStart?.(id, 'left', e);
+            }}
+            onPointerUp={(e) => {
+              e.stopPropagation();
+              onPortEnd?.(id, 'left');
+            }}
+            title="Connect relationship"
+          />
+          <div
+            className="exp-port right"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onPortStart?.(id, 'right', e);
+            }}
+            onPointerUp={(e) => {
+              e.stopPropagation();
+              onPortEnd?.(id, 'right');
+            }}
+            title="Connect relationship"
+          />
+        </>
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { getEngineDisplayName } from '../../utils/engineUtils';
 import './Sidebar.css';
 
 export default function Sidebar({
@@ -8,24 +9,57 @@ export default function Sidebar({
   docCount = 0,
   currentView = 'canvas',
   explorations = ['exploration_01'],
+  explorationsData = {},
   currentExploration = 'exploration_01',
   onSelectExploration,
   onCreateExploration,
+  onRenameExploration,
   workflows = ['extraction'],
+  workflowsData = {},
   currentWorkflow = 'extraction',
   onSelectWorkflow,
   onCreateWorkflow,
-  engines = ['file_detection'],
+  onRenameWorkflow,
+  engines = ['file_detection', 'document_extractor'],
+  enginesData = {},
   currentEngine = 'file_detection',
   onSelectEngine,
   onCreateEngine,
   onOpenEngines,
   onOpenTools,
+  onOpenSynthesis,
+  onOpenLogs,
+  isWorkflowRunning = false,
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isExplorationOpen, setIsExplorationOpen] = useState(true);
   const [isWorkflowOpen, setIsWorkflowOpen] = useState(true);
   const [isEnginesOpen, setIsEnginesOpen] = useState(true);
+  const [editingKey, setEditingKey] = useState(null);
+  const [editValue, setEditValue] = useState('');
+
+  const handleStartRename = (type, uid, initialName) => {
+    setEditingKey(`${type}:${uid}`);
+    setEditValue(initialName || uid);
+  };
+
+  const handleSaveRename = (type, uid) => {
+    const sanitized = editValue.replace(/[^a-zA-Z0-9_\- ]/g, '').trim();
+    if (sanitized) {
+      if (type === 'exp') {
+        onRenameExploration?.(uid, sanitized);
+      } else if (type === 'wf') {
+        onRenameWorkflow?.(uid, sanitized);
+      }
+    }
+    setEditingKey(null);
+    setEditValue('');
+  };
+
+  const handleCancelRename = () => {
+    setEditingKey(null);
+    setEditValue('');
+  };
 
   // Close on Escape key
   useEffect(() => {
@@ -90,6 +124,34 @@ export default function Sidebar({
         </div>
 
         <nav className="drawer-content">
+          {/* Documents (Top level resource input) */}
+          <div className="drawer-nav-group">
+            <button
+              type="button"
+              className={`drawer-item ${currentView === 'documents' ? 'active' : ''}`}
+              onClick={() => {
+                setIsOpen(false);
+                onOpenDocuments?.();
+              }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+              </svg>
+              <span className="drawer-item-title">Documents</span>
+              <span className="drawer-item-digit">{docCount}</span>
+            </button>
+          </div>
+
           {/* Exploration Section (Expandable with + and chevron) */}
           <div className="drawer-nav-group">
             <div
@@ -149,20 +211,58 @@ export default function Sidebar({
               <div className="exploration-sublist">
                 {explorations.map((exp) => {
                   const isActive = currentView === 'canvas' && exp === currentExploration;
+                  const displayName = explorationsData?.[exp]?.name || exp;
+                  const isEditing = editingKey === `exp:${exp}`;
+
                   return (
-                    <button
-                      key={exp}
-                      type="button"
-                      className={`exploration-subitem ${isActive ? 'active' : ''}`}
-                      onClick={() => {
-                        onSelectExploration?.(exp);
-                        setIsOpen(false);
-                      }}
-                      title={exp}
-                    >
-                      <span className="exploration-subdot" />
-                      <span className="exploration-subname">{exp}</span>
-                    </button>
+                    <div key={exp} className="exploration-subitem-wrap">
+                      {isEditing ? (
+                        <div className="subitem-rename-box" onClick={(e) => e.stopPropagation()}>
+                          <span className="exploration-subdot" />
+                          <input
+                            type="text"
+                            className="subitem-rename-input"
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value.replace(/[^a-zA-Z0-9_\- ]/g, ''))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveRename('exp', exp);
+                              if (e.key === 'Escape') handleCancelRename();
+                            }}
+                            onBlur={() => handleSaveRename('exp', exp)}
+                            autoFocus
+                            maxLength={35}
+                            placeholder="Exploration name"
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          className={`exploration-subitem ${isActive ? 'active' : ''}`}
+                          onClick={() => {
+                            onSelectExploration?.(exp);
+                            setIsOpen(false);
+                          }}
+                          title={`${displayName} (${exp})`}
+                        >
+                          <span className="exploration-subdot" />
+                          <span className="exploration-subname">{displayName}</span>
+                          <button
+                            type="button"
+                            className="subitem-edit-icon-btn"
+                            title="Rename exploration"
+                            aria-label="Rename exploration"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStartRename('exp', exp, displayName);
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                            </svg>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -221,20 +321,58 @@ export default function Sidebar({
               <div className="exploration-sublist">
                 {workflows.map((wf) => {
                   const isActive = currentView === 'workflow' && wf === currentWorkflow;
+                  const displayName = workflowsData?.[wf]?.name || wf;
+                  const isEditing = editingKey === `wf:${wf}`;
+
                   return (
-                    <button
-                      key={wf}
-                      type="button"
-                      className={`exploration-subitem ${isActive ? 'active' : ''}`}
-                      onClick={() => {
-                        onSelectWorkflow?.(wf);
-                        setIsOpen(false);
-                      }}
-                      title={wf}
-                    >
-                      <span className="exploration-subdot" />
-                      <span className="exploration-subname">{wf}</span>
-                    </button>
+                    <div key={wf} className="exploration-subitem-wrap">
+                      {isEditing ? (
+                        <div className="subitem-rename-box" onClick={(e) => e.stopPropagation()}>
+                          <span className="exploration-subdot" />
+                          <input
+                            type="text"
+                            className="subitem-rename-input"
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value.replace(/[^a-zA-Z0-9_\- ]/g, ''))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveRename('wf', wf);
+                              if (e.key === 'Escape') handleCancelRename();
+                            }}
+                            onBlur={() => handleSaveRename('wf', wf)}
+                            autoFocus
+                            maxLength={35}
+                            placeholder="Workflow name"
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          className={`exploration-subitem ${isActive ? 'active' : ''}`}
+                          onClick={() => {
+                            onSelectWorkflow?.(wf);
+                            setIsOpen(false);
+                          }}
+                          title={`${displayName} (${wf})`}
+                        >
+                          <span className="exploration-subdot" />
+                          <span className="exploration-subname">{displayName}</span>
+                          <button
+                            type="button"
+                            className="subitem-edit-icon-btn"
+                            title="Rename workflow"
+                            aria-label="Rename workflow"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStartRename('wf', wf, displayName);
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                            </svg>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -298,6 +436,7 @@ export default function Sidebar({
               <div className="exploration-sublist">
                 {engines.map((eng) => {
                   const isActive = currentView === 'engines' && eng === currentEngine;
+                  const displayName = getEngineDisplayName(eng, enginesData);
                   return (
                     <button
                       key={eng}
@@ -307,10 +446,10 @@ export default function Sidebar({
                         onSelectEngine?.(eng);
                         setIsOpen(false);
                       }}
-                      title={eng}
+                      title={`${displayName} (${eng})`}
                     >
                       <span className="exploration-subdot" />
-                      <span className="exploration-subname">{eng}</span>
+                      <span className="exploration-subname">{displayName}</span>
                     </button>
                   );
                 })}
@@ -333,97 +472,50 @@ export default function Sidebar({
             </button>
           </div>
 
-          {/* Knowledge Graph */}
-          <div className="drawer-nav-group">
-            <button type="button" className="drawer-item expandable">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="2.5" />
-                <circle cx="4" cy="6" r="2" />
-                <circle cx="20" cy="6" r="2" />
-                <circle cx="5" cy="18" r="2" />
-                <circle cx="19" cy="18" r="2" />
-                <line x1="5.7" y1="7.4" x2="10" y2="10.5" />
-                <line x1="18.3" y1="7.4" x2="14" y2="10.5" />
-                <line x1="6.8" y1="16.8" x2="10" y2="13.5" />
-                <line x1="17.2" y1="16.8" x2="14" y2="13.5" />
-              </svg>
-              <span className="drawer-item-title">Knowledge Graph</span>
-              <svg className="item-chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-          </div>
 
-          {/* Documents */}
+          {/* Synthesis (Combines Findings, Artifacts, Reports) */}
           <div className="drawer-nav-group">
             <button
               type="button"
-              className={`drawer-item ${currentView === 'documents' ? 'active' : ''}`}
+              className={`drawer-item ${currentView === 'synthesis' ? 'active' : ''}`}
               onClick={() => {
                 setIsOpen(false);
-                onOpenDocuments?.();
+                onOpenSynthesis?.();
               }}
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                <polyline points="2 17 12 22 22 17" />
+                <polyline points="2 12 12 17 22 12" />
+              </svg>
+              <span className="drawer-item-title">Synthesis</span>
+            </button>
+          </div>
+
+          {/* Logs */}
+          <div className="drawer-nav-group">
+            <button
+              type="button"
+              className={`drawer-item ${currentView === 'logs' ? 'active' : ''}`}
+              onClick={() => {
+                setIsOpen(false);
+                onOpenLogs?.();
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                 <polyline points="14 2 14 8 20 8" />
                 <line x1="16" y1="13" x2="8" y2="13" />
                 <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
               </svg>
-              <span className="drawer-item-title">Documents</span>
-              <span className="drawer-item-digit">{docCount}</span>
-            </button>
-          </div>
-
-          {/* Findings */}
-          <div className="drawer-nav-group">
-            <button type="button" className="drawer-item expandable">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="9" />
-                <polyline points="9 12 11.5 14.5 15.5 9.5" />
-              </svg>
-              <span className="drawer-item-title">Findings</span>
-              <svg className="item-chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Artifacts */}
-          <div className="drawer-nav-group">
-            <button type="button" className="drawer-item expandable">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                <line x1="12" y1="22.08" x2="12" y2="12" />
-              </svg>
-              <span className="drawer-item-title">Artifacts</span>
-              <svg className="item-chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Reports */}
-          <div className="drawer-nav-group">
-            <button type="button" className="drawer-item expandable">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                <line x1="9" y1="7" x2="15" y2="7" />
-                <line x1="9" y1="11" x2="15" y2="11" />
-              </svg>
-              <span className="drawer-item-title">Reports</span>
-              <svg className="item-chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+              <span className="drawer-item-title">Logs</span>
+              {isWorkflowRunning && (
+                <svg className="sidebar-running-spinner" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="#cbd5e1" strokeWidth="2.5" />
+                  <path d="M12 2a10 10 0 0 1 10 10" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" />
+                </svg>
+              )}
             </button>
           </div>
 
