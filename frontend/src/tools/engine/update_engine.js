@@ -8,7 +8,7 @@ export const DEFINITION = {
   type: 'function',
   name: 'update_engine',
   description:
-    'Edit an existing engine without rewriting it. Provide a list of exact string replacements; each old_string must match exactly once (or set replace_all). Edits apply all-or-nothing and the result is validated before saving. Can also change name or description. Built-in engines cannot be edited.',
+    'Edit an existing engine. Provide exact string replacements (edits) or full code replacement (replace_full_code). Any updates to MANIFEST or run() must strictly preserve the canonical engine template: top-level MANIFEST dictionary (inputs and outputs with supported types) and entry function def run(input_data, context=None). Built-in engines cannot be edited.',
   parameters: {
     type: 'object',
     additionalProperties: false,
@@ -16,14 +16,21 @@ export const DEFINITION = {
       engine_id: { type: 'string', description: 'The unique ID of the engine to edit.' },
       edits: {
         type: 'array',
-        description: 'Ordered list of exact string replacements to apply to the code.',
+        description:
+          'Ordered list of exact string replacements to apply to the code. If modifying MANIFEST or ports, ensure input/output types and keys remain valid and in sync with def run(input_data, context=None).',
         items: {
           type: 'object',
           additionalProperties: false,
           properties: {
-            old_string: { type: 'string', description: 'Exact text to replace. Include surrounding lines so it matches only once.' },
+            old_string: {
+              type: 'string',
+              description: 'Exact text to replace. Include surrounding lines so it matches only once.',
+            },
             new_string: { type: 'string', description: 'Replacement text.' },
-            replace_all: { type: 'boolean', description: 'Replace every occurrence instead of requiring a single match.' },
+            replace_all: {
+              type: 'boolean',
+              description: 'Replace every occurrence instead of requiring a single match.',
+            },
           },
           required: ['old_string', 'new_string'],
         },
@@ -32,7 +39,8 @@ export const DEFINITION = {
       description: { type: 'string', description: 'Optional new description.' },
       replace_full_code: {
         type: 'string',
-        description: 'Escape hatch for large restructures: replaces the entire code. Prefer edits.',
+        description:
+          'Full Python code replacement for major restructures. Must follow the canonical engine template with top-level MANIFEST (inputs and outputs declaring supported types: text, file, json, number, boolean, image, audio) and def run(input_data, context=None). Prefer edits for small changes.',
       },
     },
     required: ['engine_id'],

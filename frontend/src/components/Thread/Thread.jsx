@@ -1,39 +1,31 @@
+import { getNodeResolvedDimensions } from '../../utils/treeLayout';
 import './Thread.css';
 
-const getNodeBox = (node) => {
+const getNodeBox = (node, isWorkflow = false) => {
   if (!node) return { width: 175, height: 56, x: 0, y: 0 };
-  const isDoc =
-    node.category === 'resource' ||
-    node.type === 'document' ||
-    node.type === 'resource' ||
-    Boolean(node.cloudinaryUrl) ||
-    Boolean(node.fileSize);
-  const type = node.type || (isDoc ? 'document' : 'finding');
 
-  let w = typeof node.width === 'number' && !Number.isNaN(node.width) ? node.width : null;
-  let h = typeof node.height === 'number' && !Number.isNaN(node.height) ? node.height : null;
+  const isWf =
+    isWorkflow ||
+    node.type === 'engine' ||
+    node.type === 'agent' ||
+    (node.type === 'input' && !node.category) ||
+    (node.type === 'output' && !node.category) ||
+    Boolean(node.engineId) ||
+    Boolean(node.modelId);
 
-  if (!w || w >= 270) {
-    if (isDoc || type === 'document') w = 275;
-    else if (type === 'topic') w = 190;
-    else if (type === 'subtopic') w = 150;
-    else if (type === 'evidence') w = 170;
-    else if (type === 'claim') w = 185;
-    else w = 185;
+  if (isWf) {
+    return {
+      width: typeof node.width === 'number' && !Number.isNaN(node.width) ? node.width : 185,
+      height: 56,
+      x: typeof node.x === 'number' && !Number.isNaN(node.x) ? node.x : 0,
+      y: typeof node.y === 'number' && !Number.isNaN(node.y) ? node.y : 0,
+    };
   }
 
-  if (!h || h >= 50) {
-    if (isDoc || type === 'document') h = 68;
-    else if (type === 'topic') h = 44;
-    else if (type === 'subtopic') h = 36;
-    else if (type === 'evidence') h = 40;
-    else if (type === 'claim') h = 42;
-    else h = 42;
-  }
-
+  const dims = getNodeResolvedDimensions(node);
   return {
-    width: w,
-    height: h,
+    width: dims.width,
+    height: dims.height,
     x: typeof node.x === 'number' && !Number.isNaN(node.x) ? node.x : 0,
     y: typeof node.y === 'number' && !Number.isNaN(node.y) ? node.y : 0,
   };
@@ -48,6 +40,7 @@ export default function Thread({
   status = 'active', // 'active' | 'analyzing' | 'rejected'
   isRejected = false,
   isAnalyzing = false,
+  isManual = false,
   onClickThread,
   onDelete,
   isInteractive = true,
@@ -56,8 +49,8 @@ export default function Thread({
 }) {
   if (!start || !end) return null;
 
-  const startBox = getNodeBox(start);
-  const endBox = getNodeBox(end);
+  const startBox = getNodeBox(start, isWorkflow);
+  const endBox = getNodeBox(end, isWorkflow);
 
   const sW = startBox.width;
   const sH = startBox.height;
@@ -141,22 +134,22 @@ export default function Thread({
       {/* Soft glow */}
       <path
         d={pathData}
-        className={`thread-glow ${condition ? 'has-condition' : ''} ${isBusy ? 'running' : ''} ${isError ? 'rejected' : ''}`}
+        className={`thread-glow ${condition ? 'has-condition' : ''} ${isBusy ? 'running' : ''} ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''}`}
       />
 
       {/* Main clean cable */}
       <path
         d={pathData}
-        className={`thread-core ${condition ? 'has-condition' : ''} ${isBusy ? 'running' : ''} ${isError ? 'rejected' : ''}`}
+        className={`thread-core ${condition ? 'has-condition' : ''} ${isBusy ? 'running' : ''} ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''}`}
       />
 
       {/* Port terminal caps */}
-      <circle cx={startX} cy={startY} r={4.5} className={`thread-port-glow ${isError ? 'rejected' : ''}`} />
+      <circle cx={startX} cy={startY} r={4.5} className={`thread-port-glow ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''}`} />
       <circle cx={startX} cy={startY} r={2} className="thread-port-core" />
 
       {!isLive && (
         <>
-          <circle cx={endX} cy={endY} r={4.5} className={`thread-port-glow ${isError ? 'rejected' : ''}`} />
+          <circle cx={endX} cy={endY} r={4.5} className={`thread-port-glow ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''}`} />
           <circle cx={endX} cy={endY} r={2} className="thread-port-core" />
         </>
       )}

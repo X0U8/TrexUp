@@ -29,11 +29,29 @@
 
 .doc-modal-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   border-bottom: 1px solid #f1f5f9;
   padding-bottom: 10px;
   gap: 10px;
+}
+
+.doc-header-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.doc-node-id-sub {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  color: #94a3b8;
+  padding-left: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Document Title View (clickable to edit) */
@@ -73,6 +91,12 @@
   height: 13px;
   color: #94a3b8;
   flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.doc-modal-title-view:hover .doc-title-edit-hint {
+  opacity: 1;
 }
 
 /* Document Title Edit Mode */
@@ -165,10 +189,30 @@
 
 .doc-modal-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   gap: 8px;
-  padding-top: 6px;
+  padding-top: 8px;
   border-top: 1px solid #f1f5f9;
+}
+
+.doc-btn-delete {
+  background: transparent;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 450;
+  transition: all 0.15s ease;
+}
+
+.doc-btn-delete:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
 }
 
 .doc-modal-actions .btn-secondary {
@@ -182,6 +226,7 @@
   font-family: inherit;
   font-weight: 400;
   transition: all 0.15s ease;
+  margin-left: auto;
 }
 
 .doc-modal-actions .btn-secondary:hover {

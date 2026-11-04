@@ -5,15 +5,28 @@ export const DEFINITION = {
   type: 'function',
   name: 'create_engine',
   description:
-    'Create a new engine from Python code. The code must define a MANIFEST dict and an entry function `def run(input_data, context=None)`. Refused if the ID already exists or the code has a syntax error, no MANIFEST, or no run().',
+    'Create a new engine from Python code. The code must define a top-level MANIFEST dictionary specifying its input/output ports and an entry function `def run(input_data, context=None)`. Refused if the engine_id exists or if code lacks MANIFEST or run().',
   parameters: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      engine_id: { type: 'string', description: 'Unique snake_case ID for the engine (e.g. "pdf_table_extractor").' },
-      name: { type: 'string', description: 'Short display name for the engine.' },
-      description: { type: 'string', description: 'What the engine does, what it expects as input and what it returns.' },
-      code: { type: 'string', description: 'Full Python source: MANIFEST plus `def run(input_data, context=None)`.' },
+      engine_id: {
+        type: 'string',
+        description: 'Unique snake_case ID for the engine (e.g. "text_sentiment_analyzer", "table_formatter").',
+      },
+      name: {
+        type: 'string',
+        description: 'Short human-readable display name for the engine.',
+      },
+      description: {
+        type: 'string',
+        description: 'Clear description of what the engine does, its expected inputs and return values.',
+      },
+      code: {
+        type: 'string',
+        description:
+          'Full Python source code. You MUST adhere to this exact canonical engine template:\n\nMANIFEST = {\n    "name": "<engine_id>",\n    "version": "1.0.0",\n    "description": "<one-sentence summary>",\n    "inputs": {\n        "<input_port>": {\n            "type": "text",       # Supported: "text", "file", "json", "number", "boolean", "image", "audio"\n            "required": True,\n            "description": "<what this input represents>"\n        }\n    },\n    "outputs": {\n        "<output_port>": {\n            "type": "json",       # Supported: "json", "text", "file", "image", "audio"\n            "description": "<what this output represents>"\n        }\n    }\n}\n\ndef run(input_data, context=None):\n    # input_data is a dict with keys from MANIFEST["inputs"]\n    if not isinstance(input_data, dict):\n        return {"error": "Expected dict input"}\n    value = input_data.get("<input_port>", "")\n    # your processing logic here\n    return {"<output_port>": value}',
+      },
     },
     required: ['engine_id', 'name', 'description', 'code'],
   },

@@ -31,15 +31,26 @@ export async function postJson(path, body, timeoutMs) {
   }
 }
 
-/** Syntax + shape check on the Python server. Returns null when valid, else an {error, line} object. */
 export async function validateCode(code) {
   try {
     const { data } = await postJson('/api/engines/validate', { code }, 10000);
-    if (data.valid) return null;
-    return { error: data.error || 'Engine code is invalid', line: data.line, problems: data.problems };
+    if (data && data.valid) return null;
+    if (data && (data.error || data.problems)) {
+      return { error: data.error || 'Engine code is invalid', line: data.line, problems: data.problems };
+    }
   } catch {
-    return { error: 'Could not reach the engine server at 127.0.0.1:8001 to validate the code' };
+    // Python server offline; fallback to client-side syntax checks
   }
+
+  const hasManifest = /MANIFEST\s*=\s*\{/.test(code);
+  const hasRun = /def\s+run\s*\([^)]*\)/.test(code);
+  if (!hasManifest || !hasRun) {
+    const problems = [];
+    if (!hasManifest) problems.push('Missing top-level MANIFEST = {...}');
+    if (!hasRun) problems.push('Missing entry function: def run(input_data, context=None)');
+    return { error: problems.join('; '), problems };
+  }
+  return null;
 }
 
 export function engineExists(ctx, engineId) {

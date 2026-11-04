@@ -11,10 +11,59 @@
 const GAP_X = 90;
 const GAP_Y = 22;
 const FALLBACK_W = 185;
-const FALLBACK_H = 42;
+const FALLBACK_H = 30;
 
-const widthOf = (n) => n.width || FALLBACK_W;
-const heightOf = (n) => n.height || FALLBACK_H;
+/**
+ * Computes exact width and height for any canvas node based on its title and type.
+ * Synchronized across MovableNode, Thread connections, and layout.
+ */
+export function getNodeResolvedDimensions(node) {
+  if (!node) return { width: 185, height: 30 };
+
+  const isWorkflow =
+    node.type === 'engine' ||
+    node.type === 'agent' ||
+    (node.type === 'input' && !node.category) ||
+    (node.type === 'output' && !node.category) ||
+    Boolean(node.engineId) ||
+    Boolean(node.modelId);
+
+  if (isWorkflow) {
+    return {
+      width: typeof node.width === 'number' && !Number.isNaN(node.width) ? node.width : 185,
+      height: 56,
+    };
+  }
+
+  const isDoc =
+    node.category === 'resource' ||
+    node.type === 'document' ||
+    node.type === 'resource' ||
+    Boolean(node.cloudinaryUrl) ||
+    Boolean(node.fileSize);
+
+  if (isDoc) {
+    return { width: 280, height: 60 };
+  }
+
+  const rawTitle = (node.title || node.name || 'Node').replace(/\.node$/i, '');
+  const type = node.type || 'finding';
+
+  const isTopic = type === 'topic';
+  const charWidth = isTopic ? 7.2 : 6.6;
+  const padding = 34; // comfortable clearance from left & right port dots
+  const contentWidth = Math.ceil(rawTitle.length * charWidth) + padding;
+
+  const minW = isTopic ? 170 : 150;
+  const maxW = isTopic ? 320 : 300;
+  const resolvedWidth = Math.max(minW, Math.min(contentWidth, maxW));
+  const resolvedHeight = isTopic ? 34 : 28;
+
+  return { width: resolvedWidth, height: resolvedHeight };
+}
+
+const widthOf = (n) => (n ? getNodeResolvedDimensions(n).width : FALLBACK_W);
+const heightOf = (n) => (n ? getNodeResolvedDimensions(n).height : FALLBACK_H);
 const isMovable = (n) => Boolean(n) && n.autoLayout === true && n.userMoved !== true;
 
 export function layoutAutoNodes(nodes, connections) {
@@ -68,7 +117,13 @@ export function layoutAutoNodes(nodes, connections) {
       let top = centerY - total / 2;
       for (const k of kids) {
         const child = next[k];
-        next[k] = { ...child, x: Math.round(x), y: Math.round(top + (blockHeight[k] - heightOf(child)) / 2) };
+        next[k] = {
+          ...child,
+          x: Math.round(x),
+          y: Math.round(top + (blockHeight[k] - heightOf(child)) / 2),
+          width: widthOf(child),
+          height: heightOf(child),
+        };
         top += blockHeight[k] + GAP_Y;
         place(k);
       }
@@ -90,16 +145,35 @@ export function layoutAutoNodes(nodes, connections) {
  * Traverses connections to find all nodes in the connected tree rooted at rootId,
  * including topics, subtopics, findings, and claims, without crossing into other resource roots.
  */
-export function getSubtreeNodeIds(rootId, connections, nodes = {}) {
+export function getSubtreeNodeIds(rootId, arg2, arg3) {
   if (!rootId) return new Set();
+
+  // Support both (rootId, connections, nodes) and (rootId, nodes, connections)
+  let connections = arg2;
+  let nodes = arg3 || {};
+
+  const v2 = Object.values(arg2 || {})[0];
+  const v3 = Object.values(arg3 || {})[0];
+  if (v2 && (v2.x !== undefined || v2.title !== undefined || v2.name !== undefined) && !v2.source_node_id && !v2.source) {
+    // arg2 is nodes, arg3 is connections
+    nodes = arg2 || {};
+    connections = arg3 || {};
+  } else if (v3 && (v3.source_node_id || v3.source || v3.startNodeId)) {
+    connections = arg3 || {};
+    nodes = arg2 || {};
+  }
+
   const result = new Set([rootId]);
   const queue = [rootId];
 
   const adj = {};
   for (const c of Object.values(connections || {})) {
-    if (!c || !c.source_node_id || !c.target_node_id) continue;
-    (adj[c.source_node_id] ||= []).push(c.target_node_id);
-    (adj[c.target_node_id] ||= []).push(c.source_node_id);
+    if (!c) continue;
+    const src = c.source_node_id || c.source || c.startNodeId;
+    const tgt = c.target_node_id || c.target || c.endNodeId;
+    if (!src || !tgt) continue;
+    (adj[src] ||= []).push(tgt);
+    (adj[tgt] ||= []).push(src);
   }
 
   const isOtherResource = (id) => {

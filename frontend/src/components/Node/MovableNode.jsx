@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { getNodeResolvedDimensions } from '../../utils/treeLayout';
 import './MovableNode.css';
 
 export default function MovableNode({
@@ -75,18 +76,12 @@ export default function MovableNode({
   const isExtracting = Boolean(data.extracting) || status === 'extracting';
   const isLoading = isUploading || isExtracting;
 
-  const getResolvedWidth = (type, isRes) => {
-    if (isRes || type === 'document' || type === 'resource') return 275;
-    if (type === 'subtopic') return 150;
-    if (type === 'evidence') return 170;
-    if (type === 'topic') return 190;
-    return 185;
-  };
-
-  const resolvedWidth = getResolvedWidth(rawType, isResource);
+  const dims = getNodeResolvedDimensions(data);
+  const resolvedWidth = dims.width;
+  const resolvedHeight = dims.height;
 
   const nodeTitle = isUploading
-    ? 'Uploading to Cloudinary...'
+    ? 'Loading document...'
     : isExtracting
       ? 'Extracting knowledge...'
       : 'Click to inspect node';
@@ -97,6 +92,7 @@ export default function MovableNode({
       data-node-id={id}
       style={{
         width: `${resolvedWidth}px`,
+        height: `${resolvedHeight}px`,
         transform: `translate3d(${x}px, ${y}px, 0)`,
       }}
       onPointerDown={handlePointerDown}
@@ -115,26 +111,19 @@ export default function MovableNode({
           )}
         </div>
 
-        <div className="node-badges-row">
-          {isResource ? (
-            <>
-              <span className="node-category-tag resource">
-                <span className="node-type-dot" />
-                <span>Resource</span>
-              </span>
-              {isUploading ? (
-                <span className="node-status-badge uploading">uploading...</span>
-              ) : isExtracting ? (
-                <span className="node-status-badge extracting">extracting...</span>
-              ) : null}
-            </>
-          ) : (
-            <span className={`node-category-tag info ${rawType}`}>
+        {isResource && (
+          <div className="node-badges-row">
+            <span className="node-category-tag resource">
               <span className="node-type-dot" />
-              <span>{rawType.replace('_', ' ')}</span>
+              <span>Resource</span>
             </span>
-          )}
-        </div>
+            {isUploading ? (
+              <span className="node-status-badge uploading">uploading...</span>
+            ) : isExtracting ? (
+              <span className="node-status-badge extracting">extracting...</span>
+            ) : null}
+          </div>
+        )}
       </div>
 
       {/* Two side connection dots for extracted nodes only (iron ore raw resources have no ports) */}

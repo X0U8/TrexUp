@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { NODE_LIFECYCLE_DEFINITIONS, NODE_INSTRUCTIONS } from '../../tools/nodeLifecycleTools';
 import { ENGINE_TOOL_DEFINITIONS, ENGINE_INSTRUCTIONS } from '../../tools/engine';
+import { WORKFLOW_TOOL_DEFINITIONS, WORKFLOW_INSTRUCTIONS } from '../../tools/workflowTools';
 import { getGlobalChat, saveGlobalChat, clearGlobalChat } from '../../utils/db';
 import MarkdownText from './MarkdownText';
 import './ModelChatPanel.css';
@@ -12,6 +13,9 @@ export default function ModelChatPanel({
   currentExploration = 'exploration_01',
   nodes = {},
   onExecuteTool,
+  focusedNode = null,
+  onClearFocusedNode,
+  onWorkflowAssemblingChange,
 }) {
   const selectedModel = FIXED_MODEL_ID;
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -237,6 +241,13 @@ export default function ModelChatPanel({
       id: `usr-${Date.now()}`,
       sender: 'user',
       text,
+      focusedNode: focusedNode
+        ? {
+            id: focusedNode.id || focusedNode.node_id,
+            title: (focusedNode.title || focusedNode.name || 'Untitled').replace(/\.node$/i, ''),
+            type: (focusedNode.type || focusedNode.category || 'node').replace(/_/g, ' '),
+          }
+        : null,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
@@ -246,7 +257,11 @@ export default function ModelChatPanel({
     setActiveToolStatus('Connecting to model...');
 
     try {
-      const apiTools = [...NODE_LIFECYCLE_DEFINITIONS, ...ENGINE_TOOL_DEFINITIONS].map((tool) => ({
+      const apiTools = [
+        ...NODE_LIFECYCLE_DEFINITIONS,
+        ...ENGINE_TOOL_DEFINITIONS,
+        ...WORKFLOW_TOOL_DEFINITIONS,
+      ].map((tool) => ({
         type: 'function',
         function: {
           name: tool.name,
@@ -255,43 +270,64 @@ export default function ModelChatPanel({
         },
       }));
 
+      // Limit conversation history to the last 4 messages (2 complete exchanges)
+      // Exclude initial greeting and truncate long previous responses to prevent token bloat and timeouts
+      const MAX_HISTORY_MESSAGES = 4;
+      const MAX_HISTORY_CHARS = 1000;
+
       const recentHistory = messages
-        .slice(-6)
-        .map((m) => ({
-          role: m.sender === 'user' ? 'user' : 'assistant',
-          content: m.text,
-        }));
+        .filter((m) => m && m.text && m.text.trim() && m.id !== 'msg-init')
+        .slice(-MAX_HISTORY_MESSAGES)
+        .map((m) => {
+          let trimmed = m.text.trim();
+          if (trimmed.length > MAX_HISTORY_CHARS) {
+            trimmed = `${trimmed.slice(0, MAX_HISTORY_CHARS)}... (truncated for context limit)`;
+          }
+          return {
+            role: m.sender === 'user' ? 'user' : 'assistant',
+            content: trimmed,
+          };
+        });
 
       const systemPrompt = `You are Trex Assistant, the autonomous scientific research & workspace investigation assistant.
-You operate globally across the entire project and all scientific explorations.
+You operate globally across the entire project, all scientific explorations, and workflow execution pipelines.
 The active exploration canvas in focus is "${currentExploration}".
-When creating, searching, or mutating nodes, provide exploration_id as "${currentExploration}" unless the user explicitly refers to another exploration.
-You can investigate across explorations, connect findings, formulate hypotheses, synthesize evidence, and verify scientific claims across the entire workspace.
+When creating, searching, or mutating exploration nodes, provide exploration_id as "${currentExploration}" unless the user explicitly refers to another exploration.
+You can investigate across explorations, connect findings, formulate hypotheses, synthesize evidence, and configure, place, connect, and execute workflow pipelines across the entire workspace.
 
 ${NODE_INSTRUCTIONS}
 
-${ENGINE_INSTRUCTIONS}`;
+${ENGINE_INSTRUCTIONS}
+
+${WORKFLOW_INSTRUCTIONS}`;
+
+      const activeNodeContext = focusedNode
+        ? `\n\n[Active Focused Canvas Node: ID="${focusedNode.id || focusedNode.node_id}", Title="${(focusedNode.title || focusedNode.name || '').replace(/\.node$/i, '')}", Type="${focusedNode.type || focusedNode.category || 'node'}", Status="${focusedNode.status || ''}", Description="${focusedNode.description || focusedNode.summary || focusedNode.content || ''}"]`
+        : '';
+
+      const userPromptWithContext = activeNodeContext ? `${text}${activeNodeContext}` : text;
 
       let conversationMessages = [
         { role: 'system', content: systemPrompt },
         ...recentHistory,
-        { role: 'user', content: text },
+        { role: 'user', content: userPromptWithContext },
       ];
 
       const toolEvents = [];
       let finalReply = '';
       let iteration = 0;
+      let touchedWorkflowId = null;
+      let validationAttempts = 0;
       const MAX_ITERATIONS = 8;
 
       while (iteration < MAX_ITERATIONS) {
         iteration++;
         setActiveToolStatus(iteration === 1 ? 'Connecting to model...' : 'Applying tool results...');
 
-        const response = await fetch('/api/meta/v1/chat/completions', {
+        const response = await fetch('http://127.0.0.1:8001/api/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer LLM_4128710577435766_JLn17BAsh5kVInIDX9e8mEG6szQ',
           },
           body: JSON.stringify({
             model: selectedModel,
@@ -304,7 +340,8 @@ ${ENGINE_INSTRUCTIONS}`;
         });
 
         if (!response.ok) {
-          throw new Error(`API HTTP ${response.status}`);
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `Local server HTTP ${response.status}`);
         }
 
         const data = await response.json();
@@ -317,6 +354,23 @@ ${ENGINE_INSTRUCTIONS}`;
         }
 
         if (!toolCalls || toolCalls.length === 0) {
+          // If a workflow was created or touched, auto-validate and trigger auto-fix if structural issues exist
+          if (touchedWorkflowId && validationAttempts < 2 && iteration < MAX_ITERATIONS - 1) {
+            validationAttempts++;
+            const valRes = await onExecuteTool?.('validate_workflow', { workflow_id: touchedWorkflowId });
+            if (valRes && valRes.valid === false && Array.isArray(valRes.problems) && valRes.problems.length > 0) {
+              toolEvents.push({
+                toolName: 'validate_workflow',
+                label: `Auto-diagnosed ${valRes.problem_count} pipeline issue(s) — triggering auto-repair`,
+                status: 'refused',
+              });
+              conversationMessages.push({
+                role: 'user',
+                content: `[System Validation Diagnostic: Workflow "${touchedWorkflowId}" has structural errors that must be fixed before finishing: ${valRes.problems.join('; ')}. Please immediately call the appropriate workflow tools (e.g. connect_workflow_nodes, disconnect_workflow_nodes, or auto_layout_workflow) to fix these issues.]`,
+              });
+              continue;
+            }
+          }
           break;
         }
 
@@ -344,6 +398,14 @@ ${ENGINE_INSTRUCTIONS}`;
 
           const toolResult = (await onExecuteTool?.(fnName, args)) || {};
 
+          if (fnName.includes('workflow') && (toolResult?.workflow_id || args?.workflow_id)) {
+            touchedWorkflowId = toolResult?.workflow_id || args?.workflow_id;
+          }
+
+          if (fnName === 'create_workflow') {
+            onWorkflowAssemblingChange?.(true);
+          }
+
           if (toolResult?.searched) {
             const count = toolResult.count || 0;
             const q = args.query ? `"${args.query}"` : 'all';
@@ -354,7 +416,7 @@ ${ENGINE_INSTRUCTIONS}`;
               nodeId: count > 0 ? toolResult.nodes[0]?.node_id : undefined,
               status: count > 0 ? 'success' : 'refused',
             });
-          } else if (toolResult?.connected) {
+          } else if (toolResult?.connected && fnName === 'connect_nodes') {
             const rel = args.relationship_type ? ` [${args.relationship_type}]` : '';
             toolEvents.push({
               toolName: fnName,
@@ -456,6 +518,90 @@ ${ENGINE_INSTRUCTIONS}`;
               label: `Test failed${toolResult.line ? ` at line ${toolResult.line}` : ''}: ${toolResult.error}`,
               status: 'refused',
             });
+          } else if (fnName === 'list_workflows' && toolResult?.workflows) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Listed ${toolResult.count} workflows`,
+              status: 'success',
+            });
+          } else if (fnName === 'get_workflow' && toolResult?.workflow_id) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Inspected workflow "${toolResult.name || toolResult.workflow_id}" (${toolResult.node_count} nodes, ${toolResult.thread_count} threads)`,
+              status: 'success',
+            });
+          } else if (fnName === 'create_workflow' && toolResult?.created) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Created workflow "${toolResult.name || toolResult.workflow_id}"`,
+              status: 'success',
+            });
+          } else if (fnName === 'duplicate_workflow' && toolResult?.duplicated) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Duplicated workflow to "${toolResult.name}"`,
+              status: 'success',
+            });
+          } else if (fnName === 'add_workflow_node' && toolResult?.added) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Added ${toolResult.node?.type || 'node'} "${toolResult.node?.title || toolResult.node?.id}" to workflow`,
+              status: 'success',
+            });
+          } else if (fnName === 'batch_place_nodes' && toolResult?.placed) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Placed ${toolResult.placed_count} workflow nodes`,
+              status: 'success',
+            });
+          } else if (fnName === 'move_workflow_node' && toolResult?.moved) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Moved node "${args.node_id}" to (${args.x}, ${args.y})`,
+              status: 'success',
+            });
+          } else if (fnName === 'update_workflow_node' && toolResult?.updated) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Updated workflow node "${toolResult.node?.title || args.node_id}"`,
+              status: 'success',
+            });
+          } else if (fnName === 'delete_workflow_node' && toolResult?.deleted) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Deleted node "${args.node_id}" from workflow`,
+              status: 'success',
+            });
+          } else if (fnName === 'connect_workflow_nodes' && toolResult?.connected) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Connected "${args.from_node}" -> "${args.to_node}" in workflow`,
+              status: 'success',
+            });
+          } else if (fnName === 'auto_layout_workflow' && toolResult?.arranged) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Auto-arranged ${toolResult.node_count} nodes in workflow`,
+              status: 'success',
+            });
+          } else if (fnName === 'list_agent_models' && toolResult?.models) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Listed ${toolResult.count} valid agent models`,
+              status: 'success',
+            });
+          } else if (fnName === 'validate_workflow' && toolResult?.valid !== undefined) {
+            toolEvents.push({
+              toolName: fnName,
+              label: toolResult.valid ? 'Workflow validated: 0 problems' : `Validation: ${toolResult.problem_count} problem(s)`,
+              status: toolResult.valid ? 'success' : 'refused',
+            });
+          } else if (fnName === 'execute_workflow' && toolResult?.executed) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Executed workflow "${args.workflow_id}" (${toolResult.status})`,
+              status: 'success',
+            });
           } else if (toolResult?.error) {
             toolEvents.push({
               toolName: fnName,
@@ -464,10 +610,15 @@ ${ENGINE_INSTRUCTIONS}`;
             });
           }
 
+          let toolContent = JSON.stringify(toolResult);
+          if (toolContent.length > 2500) {
+            toolContent = `${toolContent.slice(0, 2500)}... (truncated)`;
+          }
+
           conversationMessages.push({
             role: 'tool',
             tool_call_id: call.id,
-            content: JSON.stringify(toolResult),
+            content: toolContent,
           });
         }
       }
@@ -498,98 +649,11 @@ ${ENGINE_INSTRUCTIONS}`;
         },
       ]);
     } catch (err) {
-      console.warn('API call encountered error, applying intelligent fallback:', err);
-      const lower = text.toLowerCase();
-      let fallbackText = '';
-      const toolEvents = [];
-
-      if (lower.includes('create') || lower.includes('add') || lower.includes('make')) {
-        let type = 'finding';
-        if (lower.includes('hypo')) type = 'hypothesis';
-        else if (lower.includes('claim')) type = 'claim';
-        else if (lower.includes('topic')) type = 'topic';
-        else if (lower.includes('evidence')) type = 'evidence';
-
-        const cleanTitle =
-          text
-            .replace(/create|add|make|a|node|called|for|test|titled|finding|hypothesis|claim/gi, '')
-            .trim() || 'Investigation Finding';
-
-        const res = onExecuteTool?.('create_node', {
-          exploration_id: currentExploration,
-          title: cleanTitle,
-          description: `Created via ${selectedModel}: ${text}`,
-          node_type: type,
-          status: 'proposed',
-        });
-
-        if (res?.created) {
-          toolEvents.push({
-            toolName: 'create_node',
-            label: `Created ${type} node "${res.node.title}"`,
-            nodeId: res.node.id,
-            status: 'success',
-          });
-        }
-      } else if (lower.includes('rename') || lower.includes('update')) {
-        const toMatch = text.match(/to\s+["']?([^"']+)["']?$/i);
-        const newTitle = toMatch ? toMatch[1].trim() : 'Sample Node';
-
-        // 1. Search tool step
-        const sRes = onExecuteTool?.('search_nodes', {
-          exploration_id: currentExploration,
-          query: 'test',
-        });
-
-        const targetNode = sRes?.nodes?.[0];
-        if (sRes?.searched) {
-          toolEvents.push({
-            toolName: 'search_nodes',
-            label: `Searched nodes: found ${sRes.count} matching "test"${targetNode ? ` (${targetNode.title})` : ''}`,
-            nodeId: targetNode?.node_id,
-            status: sRes.count > 0 ? 'success' : 'refused',
-          });
-        }
-
-        // 2. Update tool step
-        const res = onExecuteTool?.('update_node', {
-          exploration_id: currentExploration,
-          node_id: targetNode?.node_id || text,
-          title: newTitle,
-        });
-
-        if (res?.updated) {
-          toolEvents.push({
-            toolName: 'update_node',
-            label: `Updated node "${res.node?.title || newTitle}"`,
-            nodeId: res.node?.id || targetNode?.node_id,
-            status: 'success',
-          });
-        }
-      } else if (lower.includes('search') || lower.includes('find')) {
-        const qMatch = text.match(/(?:search|find|locate)\s+(?:for\s+)?["']?([^"']+)["']?/i);
-        const q = qMatch ? qMatch[1].trim() : '';
-        const sRes = onExecuteTool?.('search_nodes', {
-          exploration_id: currentExploration,
-          query: q,
-        });
-        if (sRes?.searched) {
-          toolEvents.push({
-            toolName: 'search_nodes',
-            label: `Searched nodes: found ${sRes.count} matching "${q || 'all'}"`,
-            status: 'success',
-          });
-        }
-      } else if (lower.includes('list') && lower.includes('exp')) {
-        const res = onExecuteTool?.('list_explorations', {});
-        const list = res?.explorations?.map((x) => x.exploration_id).join(', ') || currentExploration;
-        toolEvents.push({
-          toolName: 'list_explorations',
-          label: `Available explorations: ${list}`,
-          status: 'success',
-        });
-      } else {
-        fallbackText = `Understood. Ready to create nodes or investigate across the workspace (active: ${currentExploration}).`;
+      console.warn('API call encountered error:', err);
+      const errorMsg = err?.message || '';
+      let failureReason = 'The server is not online or Meta AI API is not set.';
+      if (errorMsg && !errorMsg.includes('Failed to fetch') && !errorMsg.includes('NetworkError')) {
+        failureReason = `The server is not online or Meta AI API is not set (${errorMsg}).`;
       }
 
       setMessages((prev) => [
@@ -597,14 +661,21 @@ ${ENGINE_INSTRUCTIONS}`;
         {
           id: `rep-${Date.now()}`,
           sender: 'model',
-          text: fallbackText,
-          toolEvents,
+          text: failureReason,
+          toolEvents: [
+            {
+              toolName: 'connection',
+              label: 'Server offline or Meta AI API not set',
+              status: 'refused',
+            },
+          ],
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
     } finally {
       setIsLoading(false);
       setActiveToolStatus('');
+      onWorkflowAssemblingChange?.(false, '', '', touchedWorkflowId);
     }
   };
 
@@ -737,6 +808,13 @@ ${ENGINE_INSTRUCTIONS}`;
                     </div>
                   )}
 
+                  {msg.focusedNode && (
+                    <div className="chat-bubble-node-ref">
+                      <span className="chat-ref-dot" />
+                      <span className="chat-ref-title">{msg.focusedNode.title}</span>
+                    </div>
+                  )}
+
                   <div className="chat-bubble-time">{msg.time}</div>
                 </div>
               </div>
@@ -756,11 +834,42 @@ ${ENGINE_INSTRUCTIONS}`;
             <div ref={messagesEndRef} />
           </div>
 
+          {focusedNode && (
+            <div className="chat-focused-node-bar">
+              <div className="chat-focused-node-pill">
+                <span className="chat-focused-dot" />
+                <span className="chat-focused-type">
+                  {(focusedNode.type || focusedNode.category || 'node').replace(/_/g, ' ')}:
+                </span>
+                <span
+                  className="chat-focused-title"
+                  title={focusedNode.title || focusedNode.name}
+                >
+                  {(focusedNode.title || focusedNode.name || 'Untitled').replace(/\.node$/i, '')}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="chat-focused-clear-btn"
+                onClick={onClearFocusedNode}
+                title="Clear node focus"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <form className="model-chat-form" onSubmit={handleSend}>
             <input
               type="text"
               className="model-chat-input"
-              placeholder={isLoading ? 'Thinking...' : 'Ask anything...'}
+              placeholder={
+                isLoading
+                  ? 'Thinking...'
+                  : focusedNode
+                  ? `Ask about ${(focusedNode.title || focusedNode.name || 'node').replace(/\.node$/i, '')}...`
+                  : 'Ask anything...'
+              }
               value={inputVal}
               disabled={isLoading}
               onChange={(e) => setInputVal(e.target.value)}

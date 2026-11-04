@@ -6,6 +6,7 @@ export default function Breadcrumbs({
   explorationName = 'exploration_01',
   workflowName = 'extraction',
   engineName = 'file_detection',
+  experimentName = 'experiment_01',
   onGoToProjects,
 }) {
   return (
@@ -35,10 +36,16 @@ export default function Breadcrumbs({
         <span className="crumb-active">Documents</span>
       ) : currentView === 'tools' ? (
         <span className="crumb-active">Tools</span>
-      ) : currentView === 'synthesis' ? (
-        <span className="crumb-active">Synthesis</span>
       ) : currentView === 'logs' ? (
         <span className="crumb-active">Logs</span>
+      ) : currentView === 'experiment' ? (
+        <>
+          <span className="crumb-sub">experiment</span>
+          <span className="crumb-slash" aria-hidden="true">
+            /
+          </span>
+          <span className="crumb-active">{experimentName}</span>
+        </>
       ) : currentView === 'engines' ? (
         <>
           <span className="crumb-sub">engine</span>

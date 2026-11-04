@@ -1,4 +1,5 @@
 import { resolveNodeId, getExplorationContext } from './_shared';
+import { getSubtreeNodeIds } from '../../utils/treeLayout';
 
 export const DEFINITION = {
   type: 'function',
@@ -58,6 +59,18 @@ export function run(ctx, args = {}) {
   if (idsToDelete.length === 0) {
     return { error: `No matching nodes found to delete in exploration '${targetExpId}'.` };
   }
+
+  // When deleting a source document or when cascade_tree is true, delete the entire tree rooted at that document
+  const allIdsToDelete = new Set();
+  for (const id of idsToDelete) {
+    allIdsToDelete.add(id);
+    const n = updatedNodes[id];
+    if (n && (n.category === 'resource' || n.type === 'document' || args.cascade_tree)) {
+      const subtree = getSubtreeNodeIds(id, updatedConnections, updatedNodes);
+      subtree.forEach((subId) => allIdsToDelete.add(subId));
+    }
+  }
+  idsToDelete = Array.from(allIdsToDelete);
 
   let removedConnsCount = 0;
   for (const id of idsToDelete) {

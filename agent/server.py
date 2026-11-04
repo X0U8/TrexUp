@@ -13,9 +13,14 @@ import struct
 import zipfile
 import urllib
 import urllib.request
+import urllib.error
 import hashlib
 import threading
 import traceback
+import tempfile
+import subprocess
+import shutil
+import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 HOST = "127.0.0.1"
@@ -42,12 +47,23 @@ def ensure_dependencies():
 
         for mod, pkg in missing:
             print(f"[Setup] Missing dependency '{mod}'. Auto-installing {pkg}...")
+            installed = False
             try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+                subprocess.check_call([sys.executable, "-m", "pip", "install", pkg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                installed = True
+            except Exception:
+                pass
+
+            if not installed:
+                try:
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", "--break-system-packages", pkg])
+                    installed = True
+                except Exception as e:
+                    print(f"[Setup Warning] Could not auto-install {pkg}: {e}")
+                    print(f"[Setup Warning] Please run: pip install -r requirements.txt")
+
+            if installed:
                 print(f"[Setup] Successfully installed {mod}.")
-            except Exception as e:
-                print(f"[Setup Warning] Could not auto-install {pkg}: {e}")
-                print(f"[Setup Warning] Please run: pip install -r requirements.txt")
 
 
 ensure_dependencies()
@@ -56,6 +72,7 @@ ensure_dependencies()
 def load_env_file():
     env_paths = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+        os.path.join(os.getcwd(), ".env"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agent", ".env"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "meta_project", "agent", ".env"),
     ]
@@ -74,18 +91,21 @@ def load_env_file():
 
 load_env_file()
 
+DEFAULT_API_KEY = ""
+DEFAULT_BASE_URL = "https://api.meta.ai/v1"
+
 
 def get_meta_client():
     try:
         from openai import OpenAI
 
-        key = os.environ.get("MODEL_API_KEY", "")
-        base_url = os.environ.get("MODEL_API_BASE_URL", "https://api.meta.ai/v1")
+        key = os.environ.get("MODEL_API_KEY", "") or DEFAULT_API_KEY
+        base_url = os.environ.get("MODEL_API_BASE_URL", "") or DEFAULT_BASE_URL or "https://api.meta.ai/v1"
         if not key:
             load_env_file()
-            key = os.environ.get("MODEL_API_KEY", "")
+            key = os.environ.get("MODEL_API_KEY", "") or DEFAULT_API_KEY
         if not key:
-            raise ValueError("MODEL_API_KEY is not set in agent/.env")
+            raise ValueError("MODEL_API_KEY is not set.")
         return OpenAI(api_key=key, base_url=base_url, timeout=120, max_retries=3)
     except Exception as e:
         print(f"[ModelClient] Initialization error: {e}")
@@ -138,6 +158,20 @@ def resolve_local_document(input_data):
     target_path = os.path.join(DOCS_STORAGE_DIR, target_filename)
 
     # 1. Download or write to disk if not yet cached
+    if not os.path.exists(target_path) or os.path.getsize(target_path) == 0:
+        if os.path.isdir(DOCS_STORAGE_DIR):
+            for existing in os.listdir(DOCS_STORAGE_DIR):
+                if clean_filename and (existing == clean_filename or existing.endswith(f"_{clean_filename}")):
+                    cand = os.path.join(DOCS_STORAGE_DIR, existing)
+                    if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+                        target_path = cand
+                        break
+                elif clean_prefix and existing.startswith(f"{clean_prefix}_"):
+                    cand = os.path.join(DOCS_STORAGE_DIR, existing)
+                    if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+                        target_path = cand
+                        break
+
     if not os.path.exists(target_path) or os.path.getsize(target_path) == 0:
         if b64_data:
             try:
@@ -239,17 +273,203 @@ def get_or_upload_file_id(client, file_path):
         return None
 
 
+def transcribe_audio_meta(audio_path="", raw_bytes=None, filename="audio.wav", mode="DIARIZATION"):
+    """
+    Transcribes audio via Meta's official Speech-to-Text ASR endpoint:
+    POST https://api.meta.ai/v1/asr/transcribe
+    Converts audio to mono 16-bit integer PCM WAV (24 kHz) and sends multipart payload.
+    """
+    key = os.environ.get("MODEL_API_KEY", "") or DEFAULT_API_KEY
+    if not key:
+        load_env_file()
+        key = os.environ.get("MODEL_API_KEY", "") or DEFAULT_API_KEY
+    if not key:
+        raise RuntimeError("Meta MODEL_API_KEY is not configured.")
+
+    base_url = os.environ.get("MODEL_API_BASE_URL", "") or DEFAULT_BASE_URL or "https://api.meta.ai/v1"
+    clean_base = base_url.rstrip("/")
+    if clean_base.endswith("/v1"):
+        asr_url = f"{clean_base}/asr/transcribe"
+    else:
+        asr_url = f"{clean_base}/v1/asr/transcribe"
+
+    temp_dir = tempfile.gettempdir()
+    src_path = audio_path
+    if not src_path or not os.path.exists(src_path):
+        if raw_bytes:
+            src_ext = os.path.splitext(filename)[1] or ".mp3"
+            src_path = os.path.join(temp_dir, f"raw_audio_{uuid.uuid4().hex[:8]}{src_ext}")
+            with open(src_path, "wb") as f:
+                f.write(raw_bytes)
+        else:
+            raise FileNotFoundError(f"Audio file '{filename}' could not be located on disk.")
+
+    upload_wav_path = os.path.join(temp_dir, f"transcribe_{uuid.uuid4().hex[:8]}.wav")
+    converted = False
+
+    # 1. Convert to mono 16-bit 24kHz PCM WAV via macOS afconvert
+    if os.path.exists("/usr/bin/afconvert"):
+        cmd = ["/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@24000", "-c", "1", src_path, upload_wav_path]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0 and os.path.exists(upload_wav_path) and os.path.getsize(upload_wav_path) > 0:
+            converted = True
+
+    # 2. Convert via ffmpeg if available
+    if not converted:
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if ffmpeg_bin:
+            cmd = [ffmpeg_bin, "-y", "-i", src_path, "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", upload_wav_path]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and os.path.exists(upload_wav_path) and os.path.getsize(upload_wav_path) > 0:
+                converted = True
+
+    final_audio_path = upload_wav_path if converted else src_path
+
+    boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
+    request_spec = {
+        "mode": mode or "DIARIZATION",
+        "model": "muse-voice-transcribe-1.0",
+        "audioEncoding": "WAV",
+    }
+
+    body = bytearray()
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(b'Content-Disposition: form-data; name="request"\r\n')
+    body.extend(b'Content-Type: application/json\r\n\r\n')
+    body.extend(json.dumps(request_spec).encode("utf-8"))
+    body.extend(b'\r\n')
+
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(b'Content-Disposition: form-data; name="audio"; filename="audio.wav"\r\n')
+    body.extend(b'Content-Type: audio/wav\r\n\r\n')
+    with open(final_audio_path, "rb") as f:
+        body.extend(f.read())
+    body.extend(b'\r\n')
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+
+    session_id = f"trex-{uuid.uuid4().hex[:12]}"
+    full_url = f"{asr_url}?sessionId={session_id}"
+
+    req = urllib.request.Request(
+        full_url,
+        data=bytes(body),
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "Trex-Voice-Transcribe/1.0",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as he:
+        err_body = he.read().decode("utf-8", errors="replace")
+        try:
+            err_json = json.loads(err_body)
+            msg = err_json.get("message") or err_json.get("error") or err_body
+        except Exception:
+            msg = err_body or str(he)
+        raise RuntimeError(f"Meta ASR error ({he.code}): {msg}")
+
+    if converted and os.path.exists(upload_wav_path):
+        try:
+            os.remove(upload_wav_path)
+        except Exception:
+            pass
+
+    transcript = data.get("transcript") or ""
+    turns = data.get("turns") or []
+    lines = []
+    for t in turns:
+        spk = t.get("speaker") or "Speaker"
+        t_text = t.get("transcript") or ""
+        start_s = t.get("startMs", 0) / 1000.0
+        end_s = t.get("endMs", 0) / 1000.0
+        start_str = f"{int(start_s // 60):02d}:{int(start_s % 60):02d}"
+        end_str = f"{int(end_s // 60):02d}:{int(end_s % 60):02d}"
+        lines.append(f"[{start_str} - {end_str}] Speaker {spk}: {t_text}")
+
+    formatted_transcript = "\n".join(lines) if lines else transcript
+
+    return {
+        "status": "success",
+        "transcript": transcript,
+        "formatted_transcript": formatted_transcript,
+        "turns": turns,
+        "audio_duration_ms": data.get("audioDurationMs", 0),
+        "session_id": data.get("sessionId", session_id),
+    }
+
+
 class EngineRequestHandler(BaseHTTPRequestHandler):
     def _set_cors_headers(self, status=200, content_type="application/json"):
         self.send_response(status)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Content-Type", content_type)
         self.end_headers()
 
     def do_OPTIONS(self):
         self._set_cors_headers(200)
+
+    def _delete_document_files(self, doc_id="", file_name="", local_path="", url=""):
+        deleted = []
+        if local_path and os.path.isfile(local_path):
+            try:
+                os.remove(local_path)
+                deleted.append(os.path.basename(local_path))
+            except Exception as err:
+                print(f"[DocumentDelete] Error removing {local_path}: {err}")
+
+        if os.path.isdir(DOCS_STORAGE_DIR):
+            clean_prefix = re.sub(r"[^a-zA-Z0-9_-]", "_", doc_id) if doc_id else ""
+            clean_fn = os.path.basename(file_name) if file_name else ""
+            url_fn = os.path.basename(urllib.parse.unquote(url.split("?")[0])) if url else ""
+
+            for fname in os.listdir(DOCS_STORAGE_DIR):
+                fpath = os.path.join(DOCS_STORAGE_DIR, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                should_delete = False
+                if clean_prefix and (fname.startswith(f"{clean_prefix}_") or fname == clean_prefix):
+                    should_delete = True
+                elif clean_fn and (fname == clean_fn or fname.endswith(f"_{clean_fn}")):
+                    should_delete = True
+                elif url_fn and fname == url_fn:
+                    should_delete = True
+
+                if should_delete and fname not in deleted:
+                    try:
+                        os.remove(fpath)
+                        deleted.append(fname)
+                    except Exception as err:
+                        print(f"[DocumentDelete] Error removing {fpath}: {err}")
+        return deleted
+
+    def do_DELETE(self):
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+            data = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+
+            path_part = self.path.split("?")[0].rstrip("/")
+            path_id = os.path.basename(path_part) if ("/api/documents/" in path_part or "/storage/documents/" in path_part) else ""
+            doc_id = data.get("doc_id") or data.get("node_id") or data.get("id") or path_id or ""
+            file_name = data.get("file_name") or data.get("name") or data.get("title") or ""
+            local_path = data.get("local_path") or data.get("localPath") or ""
+            url = data.get("url") or data.get("cloudinaryUrl") or ""
+
+            deleted_files = self._delete_document_files(doc_id, file_name, local_path, url)
+            self._set_cors_headers(200)
+            res = {"status": "success", "deleted_files": deleted_files, "doc_id": doc_id}
+            self.wfile.write(json.dumps(res).encode("utf-8"))
+            print(f"[{time.strftime('%X')}] Document deleted from storage -> {deleted_files}")
+        except Exception as e:
+            self._set_cors_headers(500)
+            self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
 
     def do_GET(self):
         if self.path in ["/health", "/api/health", "/"]:
@@ -263,12 +483,105 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 "storage_dir": DOCS_STORAGE_DIR,
             }
             self.wfile.write(json.dumps(response).encode("utf-8"))
+        elif self.path.startswith("/storage/documents/") or self.path.startswith("/files/"):
+            rel_name = self.path.split("/", 3)[-1]
+            rel_name = urllib.parse.unquote(rel_name.split("?")[0])
+            file_path = os.path.join(DOCS_STORAGE_DIR, os.path.basename(rel_name))
+            if os.path.isfile(file_path):
+                mime, _ = mimetypes.guess_type(file_path)
+                mime = mime or "application/octet-stream"
+                self._set_cors_headers(200, content_type=mime)
+                with open(file_path, "rb") as f:
+                    self.wfile.write(f.read())
+            else:
+                self._set_cors_headers(404)
+                self.wfile.write(json.dumps({"error": "File not found"}).encode("utf-8"))
         else:
             self._set_cors_headers(404)
             self.wfile.write(json.dumps({"error": "Endpoint not found"}).encode("utf-8"))
 
     def do_POST(self):
-        if self.path == "/api/engines/run":
+        if self.path in ["/api/upload", "/api/documents/upload"]:
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body_bytes = self.rfile.read(content_length)
+                content_type = self.headers.get("Content-Type", "")
+
+                doc_id = ""
+                file_name = "document.bin"
+                raw_bytes = b""
+
+                if "application/json" in content_type:
+                    data = json.loads(body_bytes.decode("utf-8"))
+                    file_name = data.get("file_name") or data.get("name") or "document.bin"
+                    doc_id = data.get("doc_id") or data.get("nodeId") or ""
+                    b64_data = data.get("file_bytes_b64") or data.get("b64") or ""
+                    if "," in b64_data[:60]:
+                        b64_data = b64_data.split(",", 1)[1]
+                    raw_bytes = base64.b64decode(b64_data)
+                elif "multipart/form-data" in content_type:
+                    boundary = content_type.split("boundary=")[-1].strip().encode("utf-8")
+                    parts = body_bytes.split(b"--" + boundary)
+                    for part in parts:
+                        if b"filename=" in part:
+                            header_part, file_part = part.split(b"\r\n\r\n", 1)
+                            file_part = file_part.rstrip(b"\r\n--")
+                            match = re.search(r'filename="([^"]+)"', header_part.decode("utf-8", "ignore"))
+                            if match:
+                                file_name = match.group(1)
+                            raw_bytes = file_part
+                            break
+                else:
+                    raw_bytes = body_bytes
+                    header_fn = self.headers.get("X-File-Name", "")
+                    if header_fn:
+                        file_name = urllib.parse.unquote(header_fn)
+
+                clean_prefix = re.sub(r"[^a-zA-Z0-9_-]", "_", doc_id) if doc_id else ""
+                clean_filename = os.path.basename(file_name)
+                target_filename = f"{clean_prefix}_{clean_filename}" if clean_prefix else clean_filename
+                target_path = os.path.join(DOCS_STORAGE_DIR, target_filename)
+
+                with open(target_path, "wb") as f:
+                    f.write(raw_bytes)
+
+                self._set_cors_headers(200)
+                res = {
+                    "status": "success",
+                    "file_name": clean_filename,
+                    "target_filename": target_filename,
+                    "size_bytes": len(raw_bytes),
+                    "local_path": target_path,
+                    "file_path": target_path,
+                    "url": f"http://{HOST}:{PORT}/storage/documents/{target_filename}",
+                }
+                self.wfile.write(json.dumps(res).encode("utf-8"))
+                print(f"[{time.strftime('%X')}] Document uploaded locally -> {target_path} ({len(raw_bytes)} bytes)")
+            except Exception as e:
+                self._set_cors_headers(500)
+                self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
+
+        elif self.path in ["/api/delete", "/api/documents/delete", "/api/upload/delete"]:
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+                data = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+
+                doc_id = data.get("doc_id") or data.get("node_id") or data.get("id") or ""
+                file_name = data.get("file_name") or data.get("name") or data.get("title") or ""
+                local_path = data.get("local_path") or data.get("localPath") or ""
+                url = data.get("url") or data.get("cloudinaryUrl") or ""
+
+                deleted_files = self._delete_document_files(doc_id, file_name, local_path, url)
+                self._set_cors_headers(200)
+                res = {"status": "success", "deleted_files": deleted_files, "doc_id": doc_id}
+                self.wfile.write(json.dumps(res).encode("utf-8"))
+                print(f"[{time.strftime('%X')}] Document deleted from storage -> {deleted_files}")
+            except Exception as e:
+                self._set_cors_headers(500)
+                self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
+
+        elif self.path == "/api/engines/run":
             start_time = time.perf_counter()
             try:
                 content_length = int(self.headers.get("Content-Length", 0))
@@ -315,6 +628,17 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                             # Backward compatible fallback for flat single file/media payloads
                             if val is None and port_name in ["file", "document", "image", "audio", "video"] and isinstance(input_data, dict) and "file_name" in input_data:
                                 val = input_data
+                            # Backward compatible fallback for node_pair
+                            if val is None and port_name in ["node_pair", "pair", "nodes"] and isinstance(input_data, dict):
+                                if any(k in input_data for k in ["source_node", "sourceNode", "target_node", "targetNode"]):
+                                    s_node = input_data.get("source_node") or input_data.get("sourceNode")
+                                    t_node = input_data.get("target_node") or input_data.get("targetNode")
+                                    val = {
+                                        "source_node": s_node,
+                                        "target_node": t_node,
+                                        "exploration_id": input_data.get("exploration_id") or "exploration_01",
+                                    }
+                                    input_data["node_pair"] = val
                             if val is None or val == "":
                                 raise ValueError(f"Missing required input '{port_name}' ({port_spec.get('type', 'any')})")
 
@@ -373,6 +697,10 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 body_bytes = self.rfile.read(content_length)
                 data = json.loads(body_bytes.decode("utf-8"))
 
+                client = get_meta_client()
+                if client is None:
+                    raise RuntimeError("Meta client is not configured. Please ensure MODEL_API_KEY is configured in your .env file.")
+
                 model_name = data.get("model", "muse-wonder-1.0")
                 if model_name in ["muse-wonder", "muse_wonder"]:
                     model_name = "muse-wonder-1.0"
@@ -389,10 +717,6 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 if isinstance(input_data, dict):
                     input_data = resolve_local_document(input_data)
 
-                client = get_meta_client()
-                if client is None:
-                    raise RuntimeError("Meta Model API client is not configured or openai package missing.")
-
                 file_path = ""
                 if isinstance(input_data, dict):
                     file_path = (
@@ -403,20 +727,184 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                         or ""
                     )
 
-                file_id = get_or_upload_file_id(client, file_path) if file_path else None
+                # Check for Muse Voice Transcribe / audio ASR
+                if model_name == "muse-voice-transcribe-1.0":
+                    raw_b64 = ""
+                    if isinstance(input_data, dict):
+                        raw_b64 = (
+                            input_data.get("file_bytes_b64")
+                            or input_data.get("b64")
+                            or (input_data.get("file", {}) if isinstance(input_data.get("file"), dict) else {}).get("b64")
+                            or (input_data.get("file", {}) if isinstance(input_data.get("file"), dict) else {}).get("file_bytes_b64")
+                            or ""
+                        )
+                    raw_bytes = None
+                    if raw_b64:
+                        try:
+                            if "," in raw_b64[:60]:
+                                raw_b64 = raw_b64.split(",", 1)[1]
+                            raw_bytes = base64.b64decode(raw_b64)
+                        except Exception:
+                            pass
+
+                    file_name = (
+                        (input_data.get("file_name") if isinstance(input_data, dict) else "")
+                        or (input_data.get("name") if isinstance(input_data, dict) else "")
+                        or (input_data.get("document") if isinstance(input_data, dict) else "")
+                        or ((input_data.get("file", {}) if isinstance(input_data.get("file"), dict) else {}).get("name"))
+                        or "recording.wav"
+                    )
+
+                    audio_res = transcribe_audio_meta(
+                        audio_path=file_path,
+                        raw_bytes=raw_bytes,
+                        filename=file_name,
+                        mode="DIARIZATION",
+                    )
+                    out_content = audio_res.get("formatted_transcript") or audio_res.get("transcript") or ""
+                    duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                    self._set_cors_headers(200)
+                    res = {
+                        "status": "success",
+                        "model": "muse-voice-transcribe-1.0",
+                        "response": out_content,
+                        "tool_calls": [],
+                        "output": {
+                            "transcript": audio_res.get("transcript", ""),
+                            "formatted_transcript": out_content,
+                            "synthesis": out_content,
+                            "agent_synthesis": out_content,
+                            "extracted_text": out_content,
+                            "turns": audio_res.get("turns", []),
+                            "audio_duration_ms": audio_res.get("audio_duration_ms", 0),
+                            "model": "muse-voice-transcribe-1.0",
+                            "duration_ms": duration_ms,
+                        },
+                    }
+                    self.wfile.write(json.dumps(res).encode("utf-8"))
+                    print(f"[{time.strftime('%X')}] Muse Voice Transcribe -> completed in {duration_ms}ms ({len(out_content)} chars)")
+                    return
+
+                should_include_file = data.get("include_file")
+                if should_include_file is None and isinstance(input_data, dict):
+                    should_include_file = bool(input_data.get("file") or input_data.get("file_bytes_b64") or input_data.get("include_raw_file"))
+                elif should_include_file is None:
+                    should_include_file = False
+
+                file_id = get_or_upload_file_id(client, file_path) if (file_path and should_include_file) else None
+
+                # Guard against context window token overflow from accidental base64 or giant text
+                if prompt_text and len(prompt_text) > 40000:
+                    print(f"[{time.strftime('%X')}] Notice: prompt_text length is {len(prompt_text)} chars, truncating to 40000 to prevent context token overflow")
+                    prompt_text = prompt_text[:40000] + "\n\n[Context truncated to fit model context window]"
 
                 user_content = []
                 user_content.append({"type": "input_text", "text": prompt_text or "Please analyze and extract structured findings."})
                 if file_id:
                     user_content.append({"type": "input_file", "file_id": file_id})
 
-                tools_spec = data.get("tools")
+                # Normalize tools into flat format for Meta's responses.create (and nested format for chat.completions fallback)
+                raw_tools = data.get("tools")
+                responses_tools = []
+                chat_tools = []
+                if raw_tools and isinstance(raw_tools, list):
+                    for t in raw_tools:
+                        if not isinstance(t, dict):
+                            continue
+                        t_type = t.get("type")
+                        if t_type == "tool_search":
+                            continue
+                        if t_type == "namespace":
+                            for sub_t in t.get("tools") or []:
+                                if isinstance(sub_t, dict):
+                                    fn_obj = sub_t.get("function") if isinstance(sub_t.get("function"), dict) else sub_t
+                                    fn_name = fn_obj.get("name") or sub_t.get("name")
+                                    fn_desc = fn_obj.get("description") or sub_t.get("description") or ""
+                                    fn_params = fn_obj.get("parameters") or sub_t.get("parameters") or {"type": "object", "properties": {}}
+                                    if fn_name:
+                                        responses_tools.append({
+                                            "type": "function",
+                                            "name": fn_name,
+                                            "description": fn_desc,
+                                            "parameters": fn_params,
+                                        })
+                                        chat_tools.append({
+                                            "type": "function",
+                                            "function": {
+                                                "name": fn_name,
+                                                "description": fn_desc,
+                                                "parameters": fn_params,
+                                            }
+                                        })
+                        elif t_type == "function":
+                            fn_obj = t.get("function") if isinstance(t.get("function"), dict) else t
+                            fn_name = fn_obj.get("name") or t.get("name")
+                            fn_desc = fn_obj.get("description") or t.get("description") or ""
+                            fn_params = fn_obj.get("parameters") or t.get("parameters") or {"type": "object", "properties": {}}
+                            if fn_name:
+                                responses_tools.append({
+                                    "type": "function",
+                                    "name": fn_name,
+                                    "description": fn_desc,
+                                    "parameters": fn_params,
+                                })
+                                chat_tools.append({
+                                    "type": "function",
+                                    "function": {
+                                        "name": fn_name,
+                                        "description": fn_desc,
+                                        "parameters": fn_params,
+                                    }
+                                })
+
                 tool_calls_data = []
                 out_content = ""
-                used_method = "chat.completions" if tools_spec else "responses.create"
+                used_method = "responses.create"
 
-                if tools_spec:
-                    # When tools are declared, use chat.completions with tools specification
+                tool_names_sent = [t.get("name") for t in responses_tools] if responses_tools else []
+                print(f"[{time.strftime('%X')}] agents/run -> model={model_name}, tools_sent={len(responses_tools)} {tool_names_sent}")
+
+                try:
+                    # Gold Standard: Meta's official responses.create (supports input_file and tools simultaneously)
+                    resp_kwargs = {
+                        "model": model_name,
+                        "instructions": system_prompt,
+                        "input": [{"role": "user", "content": user_content}],
+                    }
+                    if responses_tools:
+                        resp_kwargs["tools"] = responses_tools
+                        # Note: parallel_tool_calls is not sent; Meta models default to parallel and some don't accept this param
+
+                    print(f"[{time.strftime('%X')}] responses.create called with {len(resp_kwargs.get('tools', []))} tools")
+                    response = client.responses.create(**resp_kwargs)
+
+                    text_parts = []
+                    output_items = getattr(response, "output", []) or []
+                    print(f"[{time.strftime('%X')}] responses.create output items: {[getattr(i, 'type', '?') for i in output_items]}")
+                    for item in output_items:
+                        i_type = getattr(item, "type", None)
+                        if i_type == "function_call":
+                            raw_name = getattr(item, "name", "")
+                            call_id = getattr(item, "call_id", "") or getattr(item, "id", f"call_{len(tool_calls_data)}")
+                            args = getattr(item, "arguments", "{}")
+                            print(f"[{time.strftime('%X')}] responses.create -> tool_call: {raw_name}")
+                            tool_calls_data.append({
+                                "id": call_id,
+                                "name": raw_name.split(".")[-1],
+                                "raw_name": raw_name,
+                                "arguments": args,
+                            })
+                        elif i_type == "message":
+                            for c in getattr(item, "content", []) or []:
+                                if getattr(c, "type", None) == "output_text":
+                                    text_parts.append(getattr(c, "text", ""))
+
+                    out_content = " ".join(text_parts).strip() or getattr(response, "output_text", "") or ""
+                    print(f"[{time.strftime('%X')}] responses.create done -> tool_calls={len(tool_calls_data)}, text_len={len(out_content)}")
+
+                except Exception as resp_err:
+                    print(f"[{time.strftime('%X')}] responses.create FAILED ({resp_err}); falling back to chat.completions")
+                    used_method = "chat.completions"
                     messages = [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt_text},
@@ -424,48 +912,32 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                     call_kwargs = {
                         "model": model_name,
                         "messages": messages,
-                        "tools": tools_spec,
                     }
+                    if chat_tools:
+                        call_kwargs["tools"] = chat_tools
+                        print(f"[{time.strftime('%X')}] chat.completions called with {len(chat_tools)} tools")
                     if temp is not None:
                         try:
                             call_kwargs["temperature"] = float(temp)
                         except Exception:
                             pass
-                    response = client.chat.completions.create(**call_kwargs)
-                    choice = response.choices[0]
-                    out_content = choice.message.content or ""
-                    for tc in getattr(choice.message, "tool_calls", None) or []:
-                        tool_calls_data.append({
-                            "id": getattr(tc, "id", f"call_{len(tool_calls_data)}"),
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        })
-                else:
                     try:
-                        # Meta Gold Standard: responses.create with input_file
-                        response = client.responses.create(
-                            model=model_name,
-                            instructions=system_prompt,
-                            input=[{"role": "user", "content": user_content}],
-                        )
-                        out_content = getattr(response, "output_text", "") or ""
-                    except Exception as resp_err:
-                        print(f"[{time.strftime('%X')}] responses.create notice ({resp_err}); falling back to chat.completions")
-                        messages = [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt_text},
-                        ]
-                        call_kwargs = {
-                            "model": model_name,
-                            "messages": messages,
-                        }
-                        if temp is not None:
-                            try:
-                                call_kwargs["temperature"] = float(temp)
-                            except Exception:
-                                pass
                         response = client.chat.completions.create(**call_kwargs)
-                        out_content = response.choices[0].message.content or ""
+                        choice = response.choices[0]
+                        out_content = choice.message.content or ""
+                        tc_list = getattr(choice.message, "tool_calls", None) or []
+                        print(f"[{time.strftime('%X')}] chat.completions done -> tool_calls={len(tc_list)}, text_len={len(out_content)}")
+                        for tc in tc_list:
+                            tool_calls_data.append({
+                                "id": getattr(tc, "id", f"call_{len(tool_calls_data)}"),
+                                "name": tc.function.name.split(".")[-1],
+                                "raw_name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            })
+                    except Exception as chat_err:
+                        # do not silently drop tools and fall to text-only; surface the error
+                        print(f"[{time.strftime('%X')}] chat.completions with tools FAILED ({chat_err}); returning error")
+                        raise chat_err
 
                 duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
@@ -486,6 +958,111 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(res).encode("utf-8"))
                 print(f"[{time.strftime('%X')}] Agent model '{model_name}' executed -> HTTP 200 ({duration_ms}ms)")
 
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception as e:
+                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                err_msg = str(e)
+                status_code = 500
+                if "401" in err_msg or "authentication" in err_msg.lower():
+                    status_code = 401
+                elif "404" in err_msg or "not found" in err_msg.lower():
+                    status_code = 404
+                elif "429" in err_msg or "rate limit" in err_msg.lower():
+                    status_code = 429
+                elif "400" in err_msg:
+                    status_code = 400
+
+                try:
+                    self._set_cors_headers(status_code)
+                    res = {
+                        "status": "error",
+                        "error": err_msg,
+                        "http_code": status_code,
+                        "duration_ms": duration_ms,
+                    }
+                    self.wfile.write(json.dumps(res).encode("utf-8"))
+                except Exception:
+                    pass
+                print(f"[{time.strftime('%X')}] Agent model error -> HTTP {status_code} ({duration_ms}ms): {err_msg}")
+
+        elif self.path in ["/api/chat/completions", "/api/meta/v1/chat/completions", "/v1/chat/completions"]:
+            start_time = time.perf_counter()
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body_bytes = self.rfile.read(content_length)
+                data = json.loads(body_bytes.decode("utf-8"))
+
+                model_name = data.get("model", "muse-spark-1.3")
+                if model_name in ["muse-wonder", "muse_wonder"]:
+                    model_name = "muse-wonder-1.0"
+                elif model_name in ["muse-spark", "muse_spark"]:
+                    model_name = "muse-spark-1.3"
+                elif model_name in ["muse-voice", "muse-voice-transcribe"]:
+                    model_name = "muse-voice-transcribe-1.0"
+
+                messages = data.get("messages", [])
+                tools_spec = data.get("tools")
+                temp = data.get("temperature")
+                reasoning = data.get("reasoning_effort")
+
+                client = get_meta_client()
+                if client is None:
+                    raise RuntimeError("Meta client is not configured. Please ensure MODEL_API_KEY is configured in your .env file.")
+
+                call_kwargs = {
+                    "model": model_name,
+                    "messages": messages,
+                }
+                if tools_spec:
+                    call_kwargs["tools"] = tools_spec
+                if temp is not None:
+                    try:
+                        call_kwargs["temperature"] = float(temp)
+                    except Exception:
+                        pass
+                if reasoning:
+                    call_kwargs["reasoning_effort"] = reasoning
+
+                response = client.chat.completions.create(**call_kwargs)
+
+                choices_data = []
+                for c in getattr(response, "choices", []):
+                    msg = c.message
+                    t_calls = []
+                    for tc in getattr(msg, "tool_calls", None) or []:
+                        raw_name = tc.function.name
+                        norm_name = raw_name.split(".")[-1] if "." in raw_name else raw_name
+                        t_calls.append({
+                            "id": getattr(tc, "id", f"call_{len(t_calls)}"),
+                            "type": "function",
+                            "function": {
+                                "name": norm_name,
+                                "arguments": tc.function.arguments,
+                            }
+                        })
+                    choices_data.append({
+                        "index": getattr(c, "index", 0),
+                        "message": {
+                            "role": getattr(msg, "role", "assistant"),
+                            "content": getattr(msg, "content", "") or "",
+                            "tool_calls": t_calls if t_calls else None,
+                        },
+                        "finish_reason": getattr(c, "finish_reason", "stop"),
+                    })
+
+                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                res = {
+                    "id": getattr(response, "id", f"chatcmpl_{int(time.time())}"),
+                    "object": "chat.completion",
+                    "created": getattr(response, "created", int(time.time())),
+                    "model": model_name,
+                    "choices": choices_data,
+                    "duration_ms": duration_ms,
+                }
+                self._set_cors_headers(200)
+                self.wfile.write(json.dumps(res).encode("utf-8"))
+                print(f"[{time.strftime('%X')}] Chat completion '{model_name}' -> HTTP 200 ({duration_ms}ms)")
             except Exception as e:
                 duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
                 err_msg = str(e)
@@ -507,7 +1084,7 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                     "duration_ms": duration_ms,
                 }
                 self.wfile.write(json.dumps(res).encode("utf-8"))
-                print(f"[{time.strftime('%X')}] Agent model error -> HTTP {status_code} ({duration_ms}ms): {err_msg}")
+                print(f"[{time.strftime('%X')}] Chat completion error -> HTTP {status_code} ({duration_ms}ms): {err_msg}")
 
         elif self.path == "/api/engines/validate":
             try:

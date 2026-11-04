@@ -26,6 +26,13 @@ const isReasoningModel = (id) => {
   return typeof id === 'string' && (id.startsWith('muse-spark') || id.startsWith('muse-wonder'));
 };
 
+const normalizeModelId = (id) => {
+  if (!id) return 'muse-spark-1.3';
+  if (id === 'muse-wonder-1.0' || id === 'muse_wonder' || id === 'muse-wonder') return 'muse-wonder';
+  if (id === 'muse-voice-transcribe-1.0' || id === 'muse_voice_transcribe' || id === 'muse-voice-transcribe') return 'muse-voice-transcribe';
+  return id;
+};
+
 export default function AgentConfigModal({
   isOpen,
   agentNode,
@@ -50,19 +57,19 @@ export default function AgentConfigModal({
   useEffect(() => {
     if (agentNode) {
       setName(agentNode.title || 'Agent');
-      setModelId(agentNode.modelId || 'muse-spark-1.3');
+      setModelId(normalizeModelId(agentNode.modelId));
       setPrompt(agentNode.systemPrompt || '');
       setTemperature(typeof agentNode.temperature === 'number' ? agentNode.temperature : 0.7);
       setReasoningEffort(agentNode.reasoningEffort || 'minimal');
-      // Explicit setting wins; saved synthesis agents that predate the option keep their tools.
-      setToolAccess(
+      // Explicit setting wins; otherwise default to enabled for agent nodes
+      const hasTools =
         typeof agentNode.tools === 'boolean'
           ? agentNode.tools
-          : agentNode.id === 'agent_3' || Boolean(agentNode.title?.toLowerCase().includes('synthesis'))
-      );
+          : true;
+      setToolAccess(hasTools);
 
       // Initialize context sources
-      if (agentNode.contextSources) {
+      if (agentNode.contextSources && typeof agentNode.contextSources === 'object') {
         setContextSources({
           inputFile: Boolean(agentNode.contextSources.inputFile),
           inputMetadata: Boolean(agentNode.contextSources.inputMetadata),
@@ -70,10 +77,14 @@ export default function AgentConfigModal({
           previousMetadata: Boolean(agentNode.contextSources.previousMetadata),
         });
       } else {
-        const isSynthesis = agentNode.id === 'agent_3' || agentNode.title?.toLowerCase().includes('synthesis');
-        const src = isSynthesis ? 'previous' : (agentNode.inputSource || 'both');
+        const isVision = Boolean(
+          agentNode.title?.toLowerCase().includes('vision') ||
+          agentNode.modelId?.toLowerCase().includes('vision') ||
+          agentNode.modelId?.toLowerCase().includes('image')
+        );
+        const src = agentNode.inputSource || (isVision ? 'both' : 'previous');
         setContextSources({
-          inputFile: isSynthesis ? false : (src === 'both' || src === 'original'),
+          inputFile: src === 'both' || src === 'original' || isVision,
           inputMetadata: true,
           previousOutput: src === 'both' || src === 'previous',
           previousMetadata: src === 'both' || src === 'previous',
@@ -91,13 +102,19 @@ export default function AgentConfigModal({
     }));
   };
 
-  const supportsMax = modelId === 'muse-wonder' || modelId === 'muse-spark-1.3';
+  const handleToggleToolAccess = () => {
+    setToolAccess((prev) => !prev);
+  };
+
+  const supportsMax = normalizeModelId(modelId) === 'muse-wonder' || normalizeModelId(modelId) === 'muse-spark-1.3';
   const effortOptions = supportsMax
     ? REASONING_EFFORT_OPTIONS
     : REASONING_EFFORT_OPTIONS.filter((opt) => opt.value !== 'max');
 
   const handleSave = () => {
-    const selectedModel = AVAILABLE_AGENT_MODELS.find((m) => m.id === modelId);
+    const selectedModel = AVAILABLE_AGENT_MODELS.find(
+      (m) => normalizeModelId(m.id) === normalizeModelId(modelId)
+    );
 
     // Compute legacy inputSource for backwards compatibility
     let computedInputSource = 'both';
@@ -115,7 +132,6 @@ export default function AgentConfigModal({
       systemPrompt: prompt,
       temperature,
       reasoningEffort: isReasoningModel(modelId) ? (reasoningEffort || 'minimal') : undefined,
-      inputSource: computedInputSource,
       tools: toolAccess,
       contextSources,
       sub: selectedModel?.name || 'Muse Spark 1.3',
@@ -162,7 +178,7 @@ export default function AgentConfigModal({
             <label className="agent-modal-label">Choose Model</label>
             <div className="agent-model-grid">
               {AVAILABLE_AGENT_MODELS.map((m) => {
-                const isSelected = m.id === modelId;
+                const isSelected = normalizeModelId(m.id) === normalizeModelId(modelId);
                 return (
                   <div
                     key={m.id}
@@ -240,14 +256,14 @@ export default function AgentConfigModal({
           <div className="agent-modal-field">
             <div className="agent-modal-label-row">
               <label className="agent-modal-label">Tools</label>
-              <span className="agent-modal-hint">Off by default: the agent only returns text</span>
+              <span className="agent-modal-hint">Enable or disable tool calling for this agent</span>
             </div>
-            <div className="agent-context-grid">
+            <div className="agent-context-single">
               <label className={`agent-context-box ${toolAccess ? 'checked' : ''}`}>
-                <input type="checkbox" checked={toolAccess} onChange={() => setToolAccess((v) => !v)} />
+                <input type="checkbox" checked={toolAccess} onChange={handleToggleToolAccess} />
                 <div className="agent-context-text-col">
                   <span className="agent-context-box-text">Tool Access</span>
-                  <span className="agent-context-box-sub">Create, connect & update canvas nodes</span>
+                  <span className="agent-context-box-sub">Allows agent to invoke canvas and exploration tools</span>
                 </div>
               </label>
             </div>

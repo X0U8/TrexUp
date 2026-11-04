@@ -840,3 +840,213 @@
   background: #dc2626;
   border-color: #dc2626;
 }
+
+/* Server & Environment Setup Modal */
+.engine-server-setup-card {
+  max-width: 520px;
+  gap: 14px;
+}
+
+.engine-server-setup-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.engine-server-setup-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.engine-server-setup-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.engine-server-setup-close:hover {
+  color: #0f172a;
+  background: #f1f5f9;
+}
+
+.engine-server-live-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.engine-server-status-text {
+  font-size: 12px;
+  color: #475569;
+  font-weight: 450;
+}
+
+.engine-server-setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.engine-server-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.engine-server-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.engine-server-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.engine-server-label-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+.engine-server-key-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+  padding: 9px 12px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  color: #0f172a;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.engine-server-key-input:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.12);
+}
+
+.engine-server-prefilled-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.engine-server-sublabel {
+  font-size: 11.5px;
+  font-weight: 450;
+  color: #475569;
+}
+
+.engine-server-tag-prefilled {
+  font-size: 10.5px;
+  color: #0284c7;
+  background: #e0f2fe;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 450;
+}
+
+.engine-server-readonly-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  padding: 7px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  color: #334155;
+  outline: none;
+}
+
+.engine-server-readonly-input:focus {
+  border-color: #cbd5e1;
+}
+
+.engine-server-run-instructions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.engine-server-inst-label {
+  font-size: 11.5px;
+  color: #64748b;
+  font-weight: 450;
+}
+
+.engine-server-cmd-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.engine-server-cmd-box code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.engine-server-copy-btn {
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  color: #475569;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.engine-server-copy-btn:hover {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+.engine-server-btn-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #0284c7;
+  border: 1px solid #0284c7;
+  color: #ffffff;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 450;
+  transition: all 0.15s ease;
+}
+
+.engine-server-btn-download:hover {
+  background: #0369a1;
+  border-color: #0369a1;
+}
+
+.engine-server-btn-download.downloaded {
+  background: #10b981;
+  border-color: #10b981;
+}
+

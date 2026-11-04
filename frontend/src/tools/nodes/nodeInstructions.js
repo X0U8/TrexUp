@@ -20,8 +20,8 @@ You have access to tools that manage nodes and connections on the exploration ca
    - Use create_node for single, incremental node creation.
 
 3. Existing Nodes & Discovery:
-   - NEVER guess node IDs. First call "search_nodes" with query or title to find matching nodes and their node_id before updating, verifying, or deleting.
-   - When asked to delete multiple nodes, call "delete_node" with node_id: "all" or pass the node_ids array.
+   - When updating or deleting existing nodes whose IDs are not already provided in context, call "search_nodes" to find their node_id.
+   - When creating new nodes, directly invoke "create_node" or "create_nodes" with the provided context node ID.
 
 4. Connections:
    - When asked to connect nodes: call "connect_nodes" with source_node_id, target_node_ids (array), relationship_type, and reasoning description.

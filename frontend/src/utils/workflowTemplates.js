@@ -4,6 +4,9 @@
  */
 
 export const DEFAULT_EXTRACTION_WORKFLOW = {
+  id: 'extraction',
+  name: 'extraction',
+  description: 'Deterministic ingestion pipeline triggered on file drops. Validates files, detects types, extracts document text, transcribes audio via Muse Voice Transcribe, analyzes images via Muse Spark vision, and synthesizes structured topics and findings on the exploration canvas.',
   nodes: {
     input: {
       id: 'input',
@@ -103,7 +106,7 @@ export const DEFAULT_EXTRACTION_WORKFLOW = {
         previousMetadata: true,
       },
       systemPrompt:
-        'You are the Knowledge Synthesis Agent. Analyze extracted text, structured data, and visual notes from upstream nodes. Focus strictly on necessary topics and important subtopics, avoiding minor points or excessive granular details. Extract the primary core themes, their most important subtopics, and crucial findings. Connect main topics and findings to the source document, and connect each subtopic directly to its parent topic node. Call "create_nodes" to create them in batch on the canvas.',
+        'You are the Knowledge Synthesis Agent.\n\nRULES:\n- Never answer with plain text only. You MUST call tools to perform your work.\n- Extract primary conceptual topics, essential subtopics, and crucial findings from the document.\n- Call "create_nodes" to create them on the exploration canvas in batch, connecting topics to the source document and subtopics directly to their parent topic nodes.',
       temperature: 0.2,
       reasoningEffort: 'minimal',
       x: 1250,
@@ -138,6 +141,9 @@ export const DEFAULT_EXTRACTION_WORKFLOW = {
 };
 
 export const DEFAULT_CONNECTION_WORKFLOW = {
+  id: 'connection_synthesis',
+  name: 'connection_synthesis',
+  description: 'Triggered when connecting two canvas exploration nodes. Prepares paired contextual evidence with node_context_builder and evaluates logical or causal relationships with Muse Spark.',
   nodes: {
     input: {
       id: 'input',

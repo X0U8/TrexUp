@@ -14,7 +14,11 @@ export const DEFINITION = {
     additionalProperties: false,
     properties: {
       engine_id: { type: 'string', description: 'The unique ID of the engine to run.' },
-      input_data: { type: 'object', description: 'Sample input passed to run(input_data, context).' },
+      input_data: {
+        type: 'object',
+        description:
+          'Sample dictionary passed to run(input_data, context=None). Keys must match the input ports declared in the engine MANIFEST["inputs"].',
+      },
       timeout_seconds: { type: 'number', description: 'Optional timeout in seconds (default 60, max 120).' },
     },
     required: ['engine_id', 'input_data'],

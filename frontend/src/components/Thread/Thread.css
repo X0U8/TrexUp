@@ -65,9 +65,31 @@
   stroke-width: 2.2px;
 }
 
+/* Manual User Connection - Distinct Elegant Shade */
+.thread-core.is-manual {
+  stroke: #6366f1;
+  stroke-width: 2.1px;
+}
+
+.thread-glow.is-manual {
+  stroke: rgba(99, 102, 241, 0.22);
+}
+
+.thread-core.is-manual.rejected {
+  stroke: #ef4444;
+}
+
+.thread-core.is-manual.running {
+  stroke: #2563eb;
+}
+
 .thread-port-glow {
   fill: #cbd5e1;
   opacity: 0.9;
+}
+
+.thread-port-glow.is-manual {
+  fill: #c7d2fe;
 }
 
 .thread-port-glow.rejected {

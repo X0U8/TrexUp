@@ -1,5 +1,6 @@
 import { NODE_LIFECYCLE_DEFINITIONS } from '../../tools/nodeLifecycleTools';
 import { ENGINE_TOOL_DEFINITIONS } from '../../tools/engine';
+import { WORKFLOW_TOOL_DEFINITIONS } from '../../tools/workflowTools';
 import './ToolsPage.css';
 
 const CATEGORY_MAP = {
@@ -20,6 +21,35 @@ const CATEGORY_MAP = {
   create_engine: 'Lifecycle',
   update_engine: 'Modification',
   test_engine: 'Testing',
+  list_workflows: 'Discovery',
+  get_workflow: 'Inspection',
+  create_workflow: 'Lifecycle',
+  duplicate_workflow: 'Lifecycle',
+  update_workflow_metadata: 'Modification',
+  delete_workflow: 'Lifecycle',
+  add_workflow_node: 'Canvas',
+  move_workflow_node: 'Canvas',
+  update_workflow_node: 'Modification',
+  delete_workflow_node: 'Canvas',
+  batch_place_nodes: 'Canvas',
+  auto_layout_workflow: 'Canvas',
+  list_agent_models: 'Discovery',
+  configure_agent_node: 'Agent',
+  set_agent_context_sources: 'Agent',
+  set_agent_tools: 'Agent',
+  configure_engine_node: 'Engine',
+  set_engine_parameters: 'Engine',
+  set_engine_input_source: 'Engine',
+  configure_input_node: 'Triggers',
+  configure_output_node: 'Triggers',
+  connect_workflow_nodes: 'Routing',
+  disconnect_workflow_nodes: 'Routing',
+  set_thread_condition: 'Routing',
+  list_workflow_threads: 'Routing',
+  validate_workflow: 'Execution',
+  execute_workflow: 'Execution',
+  get_workflow_run_state: 'Execution',
+  inspect_node_io: 'Inspection',
 };
 
 const TOOL_SECTIONS = [
@@ -34,6 +64,12 @@ const TOOL_SECTIONS = [
     title: 'Engine Tools',
     subtitle: 'Let the AI create, edit, and test engines: Python scripts with a MANIFEST and run(input_data, context). Edits are exact-string replacements, not full rewrites.',
     tools: ENGINE_TOOL_DEFINITIONS,
+  },
+  {
+    id: 'workflow',
+    title: 'Workflow Tools',
+    subtitle: 'Tools for creating, placing nodes, configuring agent intelligence, binding engines, routing threads, and executing workflow pipelines.',
+    tools: WORKFLOW_TOOL_DEFINITIONS,
   },
 ];
 

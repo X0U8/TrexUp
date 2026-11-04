@@ -18,16 +18,17 @@
     box-shadow 0.2s ease,
     background 0.2s ease;
   overflow: visible;
-  height: auto;
+  box-sizing: border-box;
 }
 
 .node-content {
   position: relative;
   z-index: 2;
-  padding: 12px 14px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
   display: flex;
-  flex-direction: column;
-  gap: 9px;
+  min-width: 0;
 }
 
 .node-title-row {
@@ -35,16 +36,20 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
 }
 
 .node-filename {
-  font-size: 13.5px;
-  font-weight: 400;
+  font-size: 11.5px;
+  font-weight: 450;
   color: #1e293b;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  min-width: 0;
+  display: block;
 }
 
 /* Small Circular Loading Animation on the Right */
@@ -118,11 +123,13 @@
   border-left: 1.5px solid #3b82f6;
 }
 .movable-node.resource-node .node-content {
-  padding: 12px 14px;
-  gap: 8px;
+  padding: 10px 14px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
 }
 .movable-node.resource-node .node-filename {
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
 }
 .movable-node.resource-node .node-category-tag.resource {
@@ -136,153 +143,65 @@
 
 /* Base compact styling for all info nodes (guaranteed smaller than resource) */
 .movable-node.info-node .node-content {
-  padding: 6px 9px;
-  gap: 3.5px;
+  padding: 0 14px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
 }
 .movable-node.info-node .node-filename {
   font-size: 11.5px;
   font-weight: 450;
-}
-.movable-node.info-node .node-category-tag {
-  font-size: 9px;
-  padding: 0.5px 5px;
+  line-height: 1.35;
 }
 
-/* Topic Node - Warm Terracotta & Compact Hierarchy */
+/* Topic Node - Warm Terracotta Left Border */
 .movable-node.type-topic {
-  border-left: 1.5px solid #c2410c;
-}
-.movable-node.type-topic .node-content {
-  padding: 6px 9px;
-  gap: 3.5px;
+  border-left: 2px solid #c2410c;
 }
 .movable-node.type-topic .node-filename {
   font-weight: 500;
   font-size: 11.5px;
   color: #0f172a;
 }
-.movable-node.type-topic .node-category-tag.info.topic {
-  background: #fff7ed;
-  color: #9a3412;
-  border-color: #ffedd5;
-}
-.movable-node.type-topic .node-category-tag.info.topic .node-type-dot {
-  background: #c2410c;
-}
 
-/* Subtopic Node - Most Compact Hierarchy */
+/* Subtopic Node - Slate Left Border */
 .movable-node.type-subtopic {
-  border-left: 1.5px solid #64748b;
-}
-.movable-node.type-subtopic .node-content {
-  padding: 4px 7px;
-  gap: 2.5px;
+  border-left: 2px solid #64748b;
 }
 .movable-node.type-subtopic .node-filename {
   font-weight: 400;
   font-size: 10.5px;
   color: #334155;
 }
-.movable-node.type-subtopic .node-category-tag.info.subtopic {
-  background: #f8fafc;
-  color: #475569;
-  border-color: #e2e8f0;
-}
-.movable-node.type-subtopic .node-category-tag.info.subtopic .node-type-dot {
-  background: #64748b;
-}
-.movable-node.type-subtopic .node-category-tag {
-  font-size: 8.5px;
-  padding: 0.5px 4px;
-}
 
-/* Finding Node */
+/* Finding Node - Amber Left Border */
 .movable-node.type-finding {
-  border-left: 1.5px solid #f59e0b;
-}
-.movable-node.type-finding .node-content {
-  padding: 5.5px 8.5px;
-  gap: 3px;
-}
-.movable-node.type-finding .node-category-tag.info.finding {
-  background: #fffbeb;
-  color: #b45309;
-  border-color: #fde68a;
-}
-.movable-node.type-finding .node-category-tag.info.finding .node-type-dot {
-  background: #f59e0b;
+  border-left: 2px solid #f59e0b;
 }
 
-/* Hypothesis Node */
+/* Hypothesis Node - Violet Left Border */
 .movable-node.type-hypothesis {
-  border-left: 1.5px solid #8b5cf6;
-}
-.movable-node.type-hypothesis .node-content {
-  padding: 5.5px 8.5px;
-  gap: 3px;
-}
-.movable-node.type-hypothesis .node-category-tag.info.hypothesis {
-  background: #f5f3ff;
-  color: #6d28d9;
-  border-color: #ddd6fe;
-}
-.movable-node.type-hypothesis .node-category-tag.info.hypothesis .node-type-dot {
-  background: #8b5cf6;
+  border-left: 2px solid #8b5cf6;
 }
 
-/* Claim Node */
+/* Claim Node - Rose Left Border */
 .movable-node.type-claim {
-  border-left: 1.5px solid #ec4899;
-}
-.movable-node.type-claim .node-content {
-  padding: 5.5px 8.5px;
-  gap: 3px;
-}
-.movable-node.type-claim .node-category-tag.info.claim {
-  background: #fdf2f8;
-  color: #be185d;
-  border-color: #fbcfe8;
-}
-.movable-node.type-claim .node-category-tag.info.claim .node-type-dot {
-  background: #ec4899;
+  border-left: 2px solid #ec4899;
 }
 
-/* Evidence Node - Compact Proportional Hierarchy */
+/* Evidence Node - Emerald Left Border */
 .movable-node.type-evidence {
-  border-left: 1.5px solid #10b981;
-}
-.movable-node.type-evidence .node-content {
-  padding: 5px 8px;
-  gap: 3px;
+  border-left: 2px solid #10b981;
 }
 .movable-node.type-evidence .node-filename {
   font-size: 11px;
   font-weight: 450;
 }
-.movable-node.type-evidence .node-category-tag.info.evidence {
-  background: #ecfdf5;
-  color: #047857;
-  border-color: #a7f3d0;
-}
-.movable-node.type-evidence .node-category-tag.info.evidence .node-type-dot {
-  background: #10b981;
-}
 
 /* Open Question Node */
 .movable-node.type-open_question {
-  border-left: 1.5px solid #06b6d4;
-}
-.movable-node.type-open_question .node-content {
-  padding: 5.5px 8.5px;
-  gap: 3px;
-}
-.movable-node.type-open_question .node-category-tag.info.open_question {
-  background: #ecfeff;
-  color: #0e7490;
-  border-color: #a5f3fc;
-}
-.movable-node.type-open_question .node-category-tag.info.open_question .node-type-dot {
-  background: #06b6d4;
+  border-left: 2px solid #06b6d4;
 }
 
 /* --- Hover & Dragging: Elevated Glow --- */

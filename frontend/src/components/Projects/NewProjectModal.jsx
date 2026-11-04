@@ -52,7 +52,7 @@ export default function NewProjectModal({ isOpen, onClose, onCreated }) {
         extraction: DEFAULT_EXTRACTION_WORKFLOW,
         connection_synthesis: DEFAULT_CONNECTION_WORKFLOW,
       },
-      engines: ['file_detection', 'document_extractor', 'node_context_builder'],
+      engines: ['resource_bridge', 'file_detection', 'document_extractor', 'node_context_builder'],
       currentEngine: 'file_detection',
     };
 

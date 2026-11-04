@@ -13,25 +13,27 @@ import ZoomControls from './components/Controls/ZoomControls';
 import Sidebar from './components/Sidebar/Sidebar';
 import DocumentModal from './components/DocumentModal/DocumentModal';
 import WorkflowDeleteModal from './components/Workflow/WorkflowDeleteModal';
+import WorkflowInfoModal from './components/Workflow/WorkflowInfoModal';
+import DeletionApprovalToast from './components/Approval/DeletionApprovalToast';
 import ProjectsPage from './components/Projects/ProjectsPage';
 import DocumentsPage from './components/Documents/DocumentsPage';
 import ToolsPage from './components/Tools/ToolsPage';
 import EnginesPage from './components/Engines/EnginesPage';
-import SynthesisPage from './components/Synthesis/SynthesisPage';
+import ExperimentPage from './components/Experiment/ExperimentPage';
 import LogsPage from './components/Logs/LogsPage';
 import Breadcrumbs from './components/Navigation/Breadcrumbs';
 import ModelsPanel from './components/Models/ModelsPanel';
 import ModelChatPanel from './components/Chat/ModelChatPanel';
 import { executeNodeTool } from './tools/nodeLifecycleTools';
 import { runEngineTool, ENGINE_TOOL_NAMES } from './tools/engine';
+import { runWorkflowTool, WORKFLOW_TOOL_NAMES } from './tools/workflow';
 import { layoutAutoNodes, getSubtreeNodeIds } from './utils/treeLayout';
-import { uploadToCloudinary } from './utils/cloudinary';
 import { saveProject, getProject, getAllProjects } from './utils/db';
 import { getEngineDisplayName, getEngineDescription, getAllEngineIds } from './utils/engineUtils';
 import ProjectLoadingScreen from './components/Common/ProjectLoadingScreen';
 import { DEFAULT_EXTRACTION_WORKFLOW, DEFAULT_WORKFLOWS } from './utils/workflowTemplates';
 import { generateSequentialNodeId, generateSequentialThreadId } from './utils/nodeIdUtils';
-import { findWorkflowForTrigger, executeWorkflow } from './utils/workflowRunner';
+import { findWorkflowForTrigger, findWorkflowsForTrigger, executeWorkflow } from './utils/workflowRunner';
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -60,15 +62,40 @@ export default function App() {
   const [nodes, setNodes] = useState({});
   const [connections, setConnections] = useState({});
   const [selectedDocNode, setSelectedDocNode] = useState(null);
+  const [chatFocusNode, setChatFocusNode] = useState(null);
   const [isDocsCollectionOpen, setIsDocsCollectionOpen] = useState(false);
   const [explorations, setExplorations] = useState(['exploration_01']);
   const [currentExploration, setCurrentExploration] = useState('exploration_01');
   const [workflows, setWorkflows] = useState(['extraction', 'connection_synthesis']);
   const [currentWorkflow, setCurrentWorkflow] = useState('extraction');
+  const currentWorkflowRef = useRef('extraction');
+  useEffect(() => {
+    currentWorkflowRef.current = currentWorkflow;
+  }, [currentWorkflow]);
+
+  const [experiments, setExperiments] = useState(['experiment_01']);
+  const [currentExperiment, setCurrentExperiment] = useState('experiment_01');
   const [engines, setEngines] = useState(['resource_bridge', 'file_detection', 'document_extractor', 'node_context_builder']);
   const [currentEngine, setCurrentEngine] = useState('file_detection');
   const [enginesData, setEnginesData] = useState({});
   const [isWorkflowLoading, setIsWorkflowLoading] = useState(false);
+  const [isWorkflowAssembling, setIsWorkflowAssembling] = useState(false);
+  const [workflowAssemblingTitle, setWorkflowAssemblingTitle] = useState('Generating Workflow Pipeline');
+  const [workflowAssemblingStatus, setWorkflowAssemblingStatus] = useState('AI is analyzing requirements & building nodes...');
+
+  const handleWorkflowAssemblingChange = (isAssembling, status, title, workflowId) => {
+    setIsWorkflowAssembling(isAssembling);
+    if (status) setWorkflowAssemblingStatus(status);
+    if (title) setWorkflowAssemblingTitle(title);
+    if (isAssembling) {
+      setCurrentView('workflow');
+    } else {
+      const targetWf = workflowId || currentWorkflowRef.current;
+      if (targetWf) {
+        handleSelectWorkflow(targetWf);
+      }
+    }
+  };
   const [selectedWorkflowNodeId, setSelectedWorkflowNodeId] = useState(null);
   const [selectedAgentNodeId, setSelectedAgentNodeId] = useState(null);
   const [selectedEngineNodeId, setSelectedEngineNodeId] = useState(null);
@@ -82,7 +109,9 @@ export default function App() {
   const [selectedExplorationThreadId, setSelectedExplorationThreadId] = useState(null);
   const [workflowNodes, setWorkflowNodes] = useState(DEFAULT_EXTRACTION_WORKFLOW.nodes);
   const [showWorkflowDeleteModal, setShowWorkflowDeleteModal] = useState(false);
+  const [showWorkflowInfoModal, setShowWorkflowInfoModal] = useState(false);
   const [notification, setNotification] = useState(null);
+  const [pendingToolApproval, setPendingToolApproval] = useState(null);
   const [globalDocCount, setGlobalDocCount] = useState(0);
 
   const isSyncingHashRef = useRef(false);
@@ -199,8 +228,8 @@ export default function App() {
         targetHash = `#/projects/${currentProject.id}/documents`;
       } else if (currentView === 'tools') {
         targetHash = `#/projects/${currentProject.id}/tools`;
-      } else if (currentView === 'synthesis') {
-        targetHash = `#/projects/${currentProject.id}/synthesis`;
+      } else if (currentView === 'experiment') {
+        targetHash = `#/projects/${currentProject.id}/experiment/${currentExperiment}`;
       } else if (currentView === 'logs') {
         targetHash = `#/projects/${currentProject.id}/logs`;
       } else {
@@ -267,14 +296,19 @@ export default function App() {
                 setWorkflows(proj.workflows);
               }
 
-              const loadedEngines = proj.engines && proj.engines.length > 0 ? proj.engines : ['resource_bridge', 'file_detection', 'document_extractor'];
-              const mergedEngines = Array.from(new Set(['resource_bridge', 'file_detection', 'document_extractor', ...loadedEngines]));
+              const loadedEngines = proj.engines && proj.engines.length > 0 ? proj.engines : ['resource_bridge', 'file_detection', 'document_extractor', 'node_context_builder'];
+              const mergedEngines = Array.from(new Set(['resource_bridge', 'file_detection', 'document_extractor', 'node_context_builder', ...loadedEngines]));
               setEngines(mergedEngines);
               if (proj.enginesData) {
                 setEnginesData(proj.enginesData);
               }
               if (proj.currentEngine) {
                 setCurrentEngine(proj.currentEngine);
+              }
+              const loadedExperiments = proj.experiments && proj.experiments.length > 0 ? proj.experiments : ['experiment_01'];
+              setExperiments(loadedExperiments);
+              if (proj.currentExperiment) {
+                setCurrentExperiment(proj.currentExperiment);
               }
               setWorkflowLogs(proj.workflowLogs || []);
 
@@ -324,8 +358,9 @@ export default function App() {
                 setCurrentView('documents');
               } else if (parts[2] === 'tools') {
                 setCurrentView('tools');
-              } else if (parts[2] === 'synthesis') {
-                setCurrentView('synthesis');
+              } else if (parts[2] === 'experiment' || parts[2] === 'experiments') {
+                if (parts[3]) setCurrentExperiment(parts[3]);
+                setCurrentView('experiment');
               } else if (parts[2] === 'logs') {
                 setCurrentView('logs');
               } else {
@@ -375,8 +410,10 @@ export default function App() {
             setCurrentView('documents');
           } else if (parts[2] === 'tools') {
             setCurrentView('tools');
-          } else if (parts[2] === 'synthesis') {
-            setCurrentView('synthesis');
+          } else if (parts[2] === 'experiment' || parts[2] === 'experiments') {
+            const expId = parts[3] || proj.currentExperiment || (experiments[0] || 'experiment_01');
+            setCurrentExperiment(expId);
+            setCurrentView('experiment');
           } else if (parts[2] === 'logs') {
             setCurrentView('logs');
           } else {
@@ -454,6 +491,7 @@ export default function App() {
 
   const handleNodeClick = (node) => {
     setSelectedDocNode(node);
+    setChatFocusNode(node);
     const isResource =
       node.category === 'resource' ||
       node.type === 'document' ||
@@ -481,12 +519,13 @@ export default function App() {
       Boolean(node.cloudinaryUrl) ||
       Boolean(node.fileSize);
 
-    let activeGroup = selectedGroupNodeIds;
-    // If dragging a resource, or dragging a node not currently in the selected group:
-    if (isResource || !selectedGroupNodeIds.has(id)) {
+    let activeGroup;
+    if (isResource) {
       activeGroup = getSubtreeNodeIds(id, connectionsRef.current, nodesRef.current);
-      setSelectedGroupNodeIds(activeGroup);
+    } else {
+      activeGroup = new Set([id]);
     }
+    setSelectedGroupNodeIds(activeGroup);
 
     const initialPositions = {};
     for (const nId of activeGroup) {
@@ -568,6 +607,102 @@ export default function App() {
     setSelectedDocNode((prev) => (prev && prev.id === id ? { ...prev, name: newName } : prev));
   };
 
+  const handleDeleteResourceNode = async (nodeToDelete) => {
+    if (!nodeToDelete) return;
+    const nodeId = typeof nodeToDelete === 'string' ? nodeToDelete : (nodeToDelete.id || nodeToDelete.node_id);
+    if (!nodeId) return;
+
+    const targetNode = nodesRef.current[nodeId] || (typeof nodeToDelete === 'object' ? nodeToDelete : null);
+    const nodeTitle = targetNode?.name || targetNode?.title || nodeId;
+
+    // Collect all nodes to delete in the tree starting from the source file
+    const nodesToDelete = getSubtreeNodeIds(nodeId, connectionsRef.current, nodesRef.current);
+
+    // 1. Remove all collected tree nodes from state
+    const nextNodes = { ...nodesRef.current };
+    nodesToDelete.forEach((id) => {
+      delete nextNodes[id];
+    });
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+
+    // 2. Remove all connected threads touching any deleted node
+    const nextConnections = { ...connectionsRef.current };
+    Object.keys(nextConnections).forEach((key) => {
+      const conn = nextConnections[key];
+      if (
+        conn &&
+        (nodesToDelete.has(conn.source_node_id) ||
+          nodesToDelete.has(conn.target_node_id) ||
+          nodesToDelete.has(conn.source) ||
+          nodesToDelete.has(conn.target))
+      ) {
+        delete nextConnections[key];
+      }
+    });
+    connectionsRef.current = nextConnections;
+    setConnections(nextConnections);
+
+    // 3. Clear UI selections
+    setSelectedDocNode(null);
+    setChatFocusNode((prev) => (prev && nodesToDelete.has(prev.id || prev.node_id) ? null : prev));
+    setSelectedGroupNodeIds((prev) => {
+      const next = new Set(prev);
+      nodesToDelete.forEach((id) => next.delete(id));
+      return next;
+    });
+
+    // 4. Update project in memory and save completely to IndexedDB storage
+    if (currentProjectRef.current) {
+      const proj = currentProjectRef.current;
+      const expName = currentExploration || 'exploration_01';
+      const currentExp = proj.explorationsData?.[expName] || {};
+
+      // Filter from proj.documents if exists
+      const updatedDocuments = Array.isArray(proj.documents)
+        ? proj.documents.filter((d) => d && !nodesToDelete.has(d.id) && !nodesToDelete.has(d.doc_id) && d.name !== nodeTitle)
+        : proj.documents;
+
+      const updatedProject = {
+        ...proj,
+        documents: updatedDocuments,
+        explorationsData: {
+          ...(proj.explorationsData || {}),
+          [expName]: {
+            ...currentExp,
+            nodes: nextNodes,
+            connections: nextConnections,
+          },
+        },
+        updatedAt: new Date().toISOString(),
+      };
+
+      currentProjectRef.current = updatedProject;
+      setCurrentProject(updatedProject);
+      saveProject(updatedProject).catch((err) => console.error('Failed to save project after deleting resource:', err));
+    }
+
+    // 5. Delete document file completely from backend storage if server is active
+    try {
+      await fetch('http://127.0.0.1:8001/api/documents/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          doc_id: nodeId,
+          file_name: targetNode?.name || targetNode?.title || '',
+          url: targetNode?.url || targetNode?.cloudinaryUrl || '',
+          local_path: targetNode?.local_path || targetNode?.localPath || '',
+        }),
+      });
+    } catch {
+      // Local server offline or file already removed
+    }
+
+    const rawType = targetNode?.category || targetNode?.type || targetNode?.node_type || 'node';
+    const typeLabel = rawType.charAt(0).toUpperCase() + rawType.slice(1);
+    setNotification(`${typeLabel} "${nodeTitle}" deleted`);
+  };
+
   const persistWorkflow = (nextNodes, nextThreads) => {
     if (!currentProjectRef.current) return;
     const wfName = currentWorkflow || 'extraction';
@@ -639,6 +774,7 @@ export default function App() {
 
     setWorkflowNodes((prev) => {
       const id = generateSequentialNodeId('agent', prev);
+      const isVision = modelId?.toLowerCase().includes('spark') || modelName?.toLowerCase().includes('vision');
       const newAgent = {
         id,
         title: 'Agent',
@@ -648,6 +784,15 @@ export default function App() {
         modelName,
         systemPrompt: '',
         temperature: 0.7,
+        reasoningEffort: 'minimal',
+        tools: true,
+        inputSource: isVision ? 'both' : 'previous',
+        contextSources: {
+          inputFile: isVision,
+          inputMetadata: true,
+          previousOutput: true,
+          previousMetadata: true,
+        },
         x: defaultX,
         y: defaultY,
         width: 175,
@@ -860,11 +1005,107 @@ export default function App() {
     }
   };
 
+function extractConnectionAiVerdict(finalRun) {
+  const agentNode =
+    finalRun?.nodes?.agent_1 ||
+    Object.values(finalRun?.nodes || {}).find((n) => n.type === 'agent');
+  const engineNode = finalRun?.nodes?.engine_1;
+
+  if (engineNode?.outputData?.valid === false || engineNode?.outputData?.status === 'rejected') {
+    return {
+      connected: false,
+      status: 'rejected',
+      relationship: 'rejected',
+      label: 'No logical connection',
+      explanation:
+        engineNode?.outputData?.reason ||
+        engineNode?.outputData?.error ||
+        'Connection criteria not met.',
+    };
+  }
+
+  const rawCandidates = [
+    agentNode?.outputData?.text,
+    agentNode?.outputData?.synthesis,
+    agentNode?.outputData?.agent_synthesis,
+    finalRun?.nodes?.output?.outputData?.synthesis,
+  ].filter(Boolean);
+
+  for (const candidate of rawCandidates) {
+    if (typeof candidate === 'object' && candidate !== null) {
+      if (candidate.connected !== undefined || candidate.relationship || candidate.label) {
+        const isConnected = candidate.connected !== false;
+        return {
+          connected: isConnected,
+          status: isConnected ? 'active' : 'rejected',
+          relationship: candidate.relationship || (isConnected ? 'connected' : 'unrelated'),
+          label: candidate.label || (isConnected ? 'Connected' : 'No logical connection'),
+          explanation: candidate.explanation || '',
+        };
+      }
+    }
+    if (typeof candidate === 'string') {
+      let cleanText = candidate.trim();
+      if (cleanText.startsWith('```')) {
+        cleanText = cleanText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      }
+      try {
+        const parsed = JSON.parse(cleanText);
+        if (parsed && typeof parsed === 'object') {
+          const isConnected = parsed.connected !== false;
+          return {
+            connected: isConnected,
+            status: isConnected ? 'active' : 'rejected',
+            relationship: parsed.relationship || (isConnected ? 'connected' : 'unrelated'),
+            label: parsed.label || (isConnected ? 'Connected' : 'No logical connection'),
+            explanation: parsed.explanation || '',
+          };
+        }
+      } catch {
+        const jsonMatch = cleanText.match(/\{[\s\S]*?\}/);
+        if (jsonMatch) {
+          try {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed && typeof parsed === 'object') {
+              const isConnected = parsed.connected !== false;
+              return {
+                connected: isConnected,
+                status: isConnected ? 'active' : 'rejected',
+                relationship: parsed.relationship || (isConnected ? 'connected' : 'unrelated'),
+                label: parsed.label || (isConnected ? 'Connected' : 'No logical connection'),
+                explanation: parsed.explanation || '',
+              };
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+
+  if (finalRun?.status === 'completed') {
+    return {
+      connected: true,
+      status: 'active',
+      relationship: 'connected',
+      label: 'Connected',
+      explanation: 'Relationship synthesized and verified by workflow.',
+    };
+  }
+
+  return {
+    connected: true,
+    status: 'active',
+    relationship: 'manual_connection',
+    label: 'Manual Connection',
+    explanation: 'Manual connection established by user.',
+  };
+}
+
   const triggerWorkflowExecution = async (triggerType, triggerPayload) => {
     const targetDocId = triggerPayload?.nodeId || triggerPayload?.doc_id;
     try {
-      const matchedWf = findWorkflowForTrigger(currentProjectRef.current, triggerType);
-      if (!matchedWf || !matchedWf.data) {
+      const matchedWfs = findWorkflowsForTrigger(currentProjectRef.current, triggerType);
+      if (!matchedWfs || matchedWfs.length === 0) {
         if (targetDocId) {
           setNodes((prev) => {
             if (!prev[targetDocId]) return prev;
@@ -900,61 +1141,74 @@ export default function App() {
         });
       }
 
-      const finalRun = await executeWorkflow({
-        workflowId: matchedWf.id,
-        workflowData: matchedWf.data,
-        project: currentProjectRef.current,
-        triggerPayload,
-        onExecuteTool: handleExecuteInvestigationTool,
-        onProgress: (updatedRun) => {
-          setWorkflowLogs((prev) => {
-            const existingIdx = prev.findIndex((r) => r.id === updatedRun.id);
-            if (existingIdx >= 0) {
-              const next = [...prev];
-              next[existingIdx] = updatedRun;
-              return next;
-            }
-            return [updatedRun, ...prev];
-          });
-
-          // If bridge resolved local file path, attach it while keeping extracting active
-          const bridgeNode = updatedRun.nodes?.engine_bridge;
-          const resolvedPath = bridgeNode?.outputData?.local_path || bridgeNode?.outputData?.file_path;
-          if (targetDocId && resolvedPath) {
-            setNodes((prev) => {
-              const targetDoc = prev[targetDocId];
-              if (!targetDoc || targetDoc.local_path === resolvedPath) return prev;
-              const next = {
-                ...prev,
-                [targetDocId]: {
-                  ...targetDoc,
-                  local_path: resolvedPath,
-                  extracting: true,
-                  status: 'extracting',
-                  updatedAt: new Date().toISOString(),
-                },
-              };
-              persistProjectNodes(next);
-              return next;
+      // Execute all matched workflows in parallel
+      const workflowPromises = matchedWfs.map((matchedWf) =>
+        executeWorkflow({
+          workflowId: matchedWf.id,
+          workflowData: matchedWf.data,
+          project: currentProjectRef.current,
+          triggerPayload,
+          onExecuteTool: handleExecuteInvestigationTool,
+          onProgress: (updatedRun) => {
+            setWorkflowLogs((prev) => {
+              const existingIdx = prev.findIndex((r) => r.id === updatedRun.id);
+              if (existingIdx >= 0) {
+                const next = [...prev];
+                next[existingIdx] = updatedRun;
+                return next;
+              }
+              return [updatedRun, ...prev];
             });
-          }
-        },
-      });
+
+            // If bridge resolved local file path, attach it while keeping extracting active
+            const bridgeNode = updatedRun.nodes?.engine_bridge;
+            const resolvedPath = bridgeNode?.outputData?.local_path || bridgeNode?.outputData?.file_path;
+            if (targetDocId && resolvedPath) {
+              setNodes((prev) => {
+                const targetDoc = prev[targetDocId];
+                if (!targetDoc || targetDoc.local_path === resolvedPath) return prev;
+                const next = {
+                  ...prev,
+                  [targetDocId]: {
+                    ...targetDoc,
+                    local_path: resolvedPath,
+                    extracting: true,
+                    status: 'extracting',
+                    updatedAt: new Date().toISOString(),
+                  },
+                };
+                persistProjectNodes(next);
+                return next;
+              });
+            }
+          },
+        })
+      );
+
+      const runResults = await Promise.allSettled(workflowPromises);
+      const successfulRuns = runResults
+        .filter((r) => r.status === 'fulfilled' && r.value)
+        .map((r) => r.value);
+      const isAnyCompleted = successfulRuns.some((run) => run.status === 'completed');
 
       // Update node status when extraction completes
       if (targetDocId) {
-        const isCompleted = finalRun?.status === 'completed';
         const resolvedPath =
-          finalRun?.nodes?.engine_bridge?.outputData?.local_path ||
-          finalRun?.nodes?.engine_bridge?.outputData?.file_path;
+          successfulRuns.find(
+            (run) => run?.nodes?.engine_bridge?.outputData?.local_path
+          )?.nodes?.engine_bridge?.outputData?.local_path ||
+          successfulRuns.find(
+            (run) => run?.nodes?.engine_bridge?.outputData?.file_path
+          )?.nodes?.engine_bridge?.outputData?.file_path;
+
         setNodes((prev) => {
           if (!prev[targetDocId]) return prev;
           const updated = {
             ...prev[targetDocId],
             local_path: resolvedPath || prev[targetDocId].local_path,
-            status: isCompleted ? 'verified' : (prev[targetDocId].status === 'extracting' ? 'not checked' : prev[targetDocId].status),
+            status: isAnyCompleted ? 'verified' : (prev[targetDocId].status === 'extracting' ? 'not checked' : prev[targetDocId].status),
             extracting: false,
-            extractionCompleted: isCompleted,
+            extractionCompleted: isAnyCompleted,
             updatedAt: new Date().toISOString(),
           };
           const next = { ...prev, [targetDocId]: updated };
@@ -963,10 +1217,56 @@ export default function App() {
         });
       }
 
+      // Update connection verdict when node_connect relationship synthesis completes
+      if (triggerType === 'node_connect') {
+        const targetConnId =
+          triggerPayload?.connectionId ||
+          triggerPayload?.connection?.id ||
+          triggerPayload?.connection?.connection_id;
+
+        if (targetConnId && successfulRuns.length > 0) {
+          const verdict = extractConnectionAiVerdict(successfulRuns[0]);
+          setConnections((prev) => {
+            const existing = prev[targetConnId];
+            if (!existing) return prev;
+            const updated = {
+              ...existing,
+              status: verdict.status,
+              label: verdict.label,
+              relationship_type: verdict.relationship,
+              explanation: verdict.explanation,
+              ai_verdict: verdict,
+              updatedAt: new Date().toISOString(),
+            };
+            const next = { ...prev, [targetConnId]: updated };
+
+            if (currentProjectRef.current && currentExploration) {
+              const currentExp = currentProjectRef.current.explorationsData?.[currentExploration] || {};
+              const updatedProject = {
+                ...currentProjectRef.current,
+                explorationsData: {
+                  ...(currentProjectRef.current.explorationsData || {}),
+                  [currentExploration]: {
+                    ...currentExp,
+                    connections: next,
+                  },
+                },
+              };
+              currentProjectRef.current = updatedProject;
+              setCurrentProject(updatedProject);
+              saveProject(updatedProject).catch((err) => console.error('Failed to save connection verdict:', err));
+            }
+
+            return next;
+          });
+        }
+      }
+
       // Persist logs in project
-      if (currentProjectRef.current) {
+      if (currentProjectRef.current && successfulRuns.length > 0) {
         setWorkflowLogs((prev) => {
-          const updatedLogs = [finalRun, ...prev.filter((r) => r.id !== finalRun.id)];
+          const runIds = new Set(successfulRuns.map((r) => r.id));
+          const updatedLogs = [...successfulRuns, ...prev.filter((r) => !runIds.has(r.id))];
           const updatedProject = {
             ...currentProjectRef.current,
             workflowLogs: updatedLogs,
@@ -993,6 +1293,43 @@ export default function App() {
           persistProjectNodes(next);
           return next;
         });
+      }
+      if (triggerType === 'node_connect') {
+        const targetConnId =
+          triggerPayload?.connectionId ||
+          triggerPayload?.connection?.id ||
+          triggerPayload?.connection?.connection_id;
+        if (targetConnId) {
+          setConnections((prev) => {
+            if (!prev[targetConnId]) return prev;
+            const updated = {
+              ...prev[targetConnId],
+              status: 'active',
+              label: 'Manual Connection',
+              relationship_type: 'manual_connection',
+              explanation: 'Manual connection established by user.',
+              updatedAt: new Date().toISOString(),
+            };
+            const next = { ...prev, [targetConnId]: updated };
+            if (currentProjectRef.current && currentExploration) {
+              const currentExp = currentProjectRef.current.explorationsData?.[currentExploration] || {};
+              const updatedProject = {
+                ...currentProjectRef.current,
+                explorationsData: {
+                  ...(currentProjectRef.current.explorationsData || {}),
+                  [currentExploration]: {
+                    ...currentExp,
+                    connections: next,
+                  },
+                },
+              };
+              currentProjectRef.current = updatedProject;
+              setCurrentProject(updatedProject);
+              saveProject(updatedProject).catch((e) => console.error('Failed to save fallback connection:', e));
+            }
+            return next;
+          });
+        }
       }
     } finally {
       setIsWorkflowRunning(false);
@@ -1035,9 +1372,12 @@ export default function App() {
               connection_id: newConnId,
               source_node_id: sourceId,
               target_node_id: targetNodeId,
-              relationship_type: 'connected',
-              label: 'Connected',
-              status: 'active',
+              relationship_type: 'analyzing',
+              label: 'Analyzing connection...',
+              status: 'analyzing',
+              is_manual: true,
+              source: 'manual',
+              createdAt: new Date().toISOString(),
             };
 
             const updatedConnections = {
@@ -1065,12 +1405,23 @@ export default function App() {
             }
 
             // Auto-trigger connection workflow if configured
+            const sNode = nodes[sourceId] || { id: sourceId };
+            const tNode = nodes[targetNodeId] || { id: targetNodeId };
             triggerWorkflowExecution('node_connect', {
               triggerType: 'node_connect',
               triggerLabel: `node_connect: Node #${sourceId} → Node #${targetNodeId}`,
-              sourceNode: nodes[sourceId] || { id: sourceId },
-              targetNode: nodes[targetNodeId] || { id: targetNodeId },
+              connectionId: newConnId,
               connection: newConnection,
+              sourceNode: sNode,
+              targetNode: tNode,
+              source_node: sNode,
+              target_node: tNode,
+              exploration_id: currentExploration || 'exploration_01',
+              node_pair: {
+                source_node: sNode,
+                target_node: tNode,
+                exploration_id: currentExploration || 'exploration_01',
+              },
             });
           }
         }
@@ -1190,6 +1541,8 @@ export default function App() {
         workflowsData: {
           ...(currentProjectRef.current.workflowsData || {}),
           [nextName]: {
+            name: nextName,
+            description: 'Custom processing workflow pipeline.',
             nodes: defaultNodes,
             threads: defaultThreads,
           },
@@ -1203,6 +1556,8 @@ export default function App() {
   };
 
   const handleSelectWorkflow = (wfName) => {
+    setIsWorkflowAssembling(false);
+    currentWorkflowRef.current = wfName;
     setCurrentWorkflow(wfName);
     setCurrentView('workflow');
     const wfData = currentProjectRef.current?.workflowsData?.[wfName] || DEFAULT_WORKFLOWS[wfName];
@@ -1248,6 +1603,34 @@ export default function App() {
     saveProject(updatedProject).catch((err) => console.error('Failed to save renamed workflow:', err));
   };
 
+  const handleUpdateWorkflowMetadata = (wfUid, { name: newName, description: newDesc }) => {
+    const sanitized = (newName || '').replace(/[^a-zA-Z0-9_\- ]/g, '').trim();
+    if (!sanitized) return;
+
+    const proj = currentProjectRef.current || currentProject;
+    if (!proj) return;
+
+    const baseData = proj.workflowsData?.[wfUid] || DEFAULT_WORKFLOWS[wfUid] || {};
+    const updatedWorkflowsData = {
+      ...(proj.workflowsData || {}),
+      [wfUid]: {
+        ...baseData,
+        name: sanitized,
+        description: typeof newDesc === 'string' ? newDesc.trim() : baseData.description || '',
+      },
+    };
+
+    const updatedProject = {
+      ...proj,
+      workflowsData: updatedWorkflowsData,
+      updatedAt: new Date().toISOString(),
+    };
+
+    currentProjectRef.current = updatedProject;
+    setCurrentProject(updatedProject);
+    saveProject(updatedProject).catch((err) => console.error('Failed to save updated workflow metadata:', err));
+  };
+
   const handleDeleteWorkflow = (wfName = currentWorkflow) => {
     if (DEFAULT_WORKFLOWS[wfName]) return;
 
@@ -1284,6 +1667,105 @@ export default function App() {
 
     setNotification(`Workflow "${wfName}" deleted`);
     setShowWorkflowDeleteModal(false);
+  };
+
+  const handleSelectExperiment = (expId) => {
+    setCurrentExperiment(expId);
+    setCurrentView('experiment');
+    if (currentProjectRef.current) {
+      const updatedProject = {
+        ...currentProjectRef.current,
+        currentExperiment: expId,
+        updatedAt: new Date().toISOString(),
+      };
+      currentProjectRef.current = updatedProject;
+      setCurrentProject(updatedProject);
+      saveProject(updatedProject).catch((err) => console.error('Failed to save selected experiment:', err));
+    }
+  };
+
+  const handleCreateExperiment = () => {
+    const count = experiments.length;
+    let nextName = `experiment_${String(count + 1).padStart(2, '0')}`;
+    let suffix = count + 1;
+    while (experiments.includes(nextName)) {
+      suffix++;
+      nextName = `experiment_${String(suffix).padStart(2, '0')}`;
+    }
+
+    setExperiments((prev) => {
+      const next = [...prev, nextName];
+      setCurrentExperiment(nextName);
+      setCurrentView('experiment');
+      if (currentProjectRef.current) {
+        const updatedProject = {
+          ...currentProjectRef.current,
+          experiments: next,
+          currentExperiment: nextName,
+          experimentsData: {
+            ...(currentProjectRef.current.experimentsData || {}),
+            [nextName]: {
+              name: nextName,
+              plan: [],
+              nodes: {},
+              connections: {},
+              findings: [],
+              artifacts: [],
+              report: '',
+              createdAt: new Date().toISOString(),
+            },
+          },
+          updatedAt: new Date().toISOString(),
+        };
+        currentProjectRef.current = updatedProject;
+        setCurrentProject(updatedProject);
+        saveProject(updatedProject).catch((err) => console.error('Failed to save new experiment:', err));
+      }
+      return next;
+    });
+  };
+
+  const handleRenameExperiment = (expId, newName) => {
+    const sanitized = (newName || '').replace(/[^a-zA-Z0-9_\- ]/g, '').trim();
+    if (!sanitized || !currentProjectRef.current) return;
+
+    const baseData = currentProjectRef.current.experimentsData?.[expId] || {};
+    const updatedExpData = {
+      ...(currentProjectRef.current.experimentsData || {}),
+      [expId]: {
+        ...baseData,
+        name: sanitized,
+      },
+    };
+    const updatedProject = {
+      ...currentProjectRef.current,
+      experimentsData: updatedExpData,
+      updatedAt: new Date().toISOString(),
+    };
+    currentProjectRef.current = updatedProject;
+    setCurrentProject(updatedProject);
+    saveProject(updatedProject).catch((err) => console.error('Failed to rename experiment:', err));
+  };
+
+  const handleUpdateExperimentData = (expId, updates) => {
+    if (!currentProjectRef.current) return;
+    const target = expId || currentExperiment;
+    const currentExp = currentProjectRef.current.experimentsData?.[target] || {};
+    const updatedProject = {
+      ...currentProjectRef.current,
+      experimentsData: {
+        ...(currentProjectRef.current.experimentsData || {}),
+        [target]: {
+          ...currentExp,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    currentProjectRef.current = updatedProject;
+    setCurrentProject(updatedProject);
+    saveProject(updatedProject).catch((err) => console.error('Failed to update experiment data:', err));
   };
 
   const handleSelectEngine = (engName) => {
@@ -1373,7 +1855,7 @@ def run(input_data, context=None):
   };
 
   const handleDeleteEngine = (engId) => {
-    if (engId === 'file_detection' || engId === 'document_extractor' || engId === 'node_context_builder') return;
+    if (['resource_bridge', 'file_detection', 'document_extractor', 'node_context_builder'].includes(engId)) return;
     setEngines((prev) => {
       const nextEngines = prev.filter((id) => id !== engId);
       setEnginesData((prevData) => {
@@ -1428,6 +1910,16 @@ def run(input_data, context=None):
 
   // Direct canvas drag-and-drop handler with Cloudinary upload
   const handleFileDrop = async (file, pos) => {
+    const isVideoOrGif =
+      /\.(mp4|webm|mov|avi|mkv|flv|wmv|m4v|gif)$/i.test(file.name) ||
+      file.type?.startsWith('video/') ||
+      file.type === 'image/gif';
+
+    if (isVideoOrGif) {
+      setNotification(`"${file.name}" is not supported. Video and GIF files are disabled.`);
+      return;
+    }
+
     if (file.size > MAX_FILE_SIZE_BYTES) {
       setNotification(`"${file.name}" exceeds the ${MAX_FILE_SIZE_MB}MB size limit.`);
       return;
@@ -1465,88 +1957,90 @@ def run(input_data, context=None):
       return next;
     });
 
-    // Trigger Cloudinary upload in background
+    const localBlobUrl = URL.createObjectURL(file);
+
+    // Read full base64 data for local storage and Python engines execution
+    let fileB64 = '';
     try {
-      const result = await uploadToCloudinary(file);
-
-      const finalizedNode = {
-        ...initialNode,
-        publicId: result.public_id,
-        assetId: result.asset_id,
-        cloudinaryUrl: result.secure_url,
-        status: 'extracting',
-        uploading: false,
-        extracting: true,
-        updatedAt: new Date().toISOString(),
-      };
-
-      setNodes((prev) => {
-        const next = { ...prev, [nodeId]: finalizedNode };
-        persistProjectNodes(next);
-        return next;
-      });
-
-      setSelectedDocNode((prev) => (prev && prev.id === nodeId ? finalizedNode : prev));
-
-      // Read base64 slice for Python engines execution
-      let fileB64 = '';
-      try {
-        const slice = file.slice(0, 4 * 1024 * 1024);
-        const buf = await slice.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        let binary = '';
-        const len = bytes.byteLength;
-        for (let i = 0; i < len; i += 8192) {
-          binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + 8192, len)));
-        }
-        fileB64 = btoa(binary);
-      } catch (readErr) {
-        console.warn('Could not read file slice for workflow runner:', readErr);
-      }
-
-      // Auto-trigger extraction workflow on file drop
-      triggerWorkflowExecution('file_drop', {
-        triggerType: 'file_drop',
-        triggerLabel: `file_drop: ${file.name}`,
-        file: {
-          name: file.name,
-          file_name: file.name,
-          size: file.size,
-          size_bytes: file.size,
-          type: file.type || 'application/octet-stream',
-          url: result.secure_url,
-          cloudinaryUrl: result.secure_url,
-          publicId: result.public_id,
-          doc_id: nodeId,
-          b64: fileB64,
-          file_bytes_b64: fileB64,
-        },
-        doc_id: nodeId,
-        nodeId: nodeId,
-      });
-    } catch (err) {
-      console.error('Upload error:', err);
-      setNotification(`Upload failed: ${err.message || 'Cloudinary error'}`);
-      setNodes((prev) => {
-        if (!prev[nodeId]) return prev;
-        const next = {
-          ...prev,
-          [nodeId]: {
-            ...prev[nodeId],
-            status: 'upload failed',
-            uploading: false,
-            updatedAt: new Date().toISOString(),
-          },
+      fileB64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const res = String(reader.result || '');
+          const comma = res.indexOf(',');
+          resolve(comma !== -1 ? res.slice(comma + 1) : res);
         };
-        persistProjectNodes(next);
-        return next;
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
       });
-      setSelectedDocNode((prev) =>
-        prev && prev.id === nodeId
-          ? { ...prev, status: 'upload failed', uploading: false }
-          : prev
-      );
+    } catch (readErr) {
+      console.warn('Could not read file base64:', readErr);
     }
+
+    let resolvedUrl = localBlobUrl;
+    let localFilePath = '';
+
+    // Persist to local Python server if available
+    try {
+      const upRes = await fetch('http://127.0.0.1:8001/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_name: file.name,
+          doc_id: nodeId,
+          file_bytes_b64: fileB64,
+        }),
+      });
+      if (upRes.ok) {
+        const upData = await upRes.json();
+        if (upData.url) resolvedUrl = upData.url;
+        if (upData.local_path) localFilePath = upData.local_path;
+      }
+    } catch {
+      // Local server offline; browser blob URL works seamlessly
+    }
+
+    const finalizedNode = {
+      ...initialNode,
+      url: resolvedUrl,
+      cloudinaryUrl: resolvedUrl,
+      local_path: localFilePath,
+      localPath: localFilePath,
+      localBlobUrl,
+      status: 'extracting',
+      uploading: false,
+      extracting: true,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setNodes((prev) => {
+      const next = { ...prev, [nodeId]: finalizedNode };
+      persistProjectNodes(next);
+      return next;
+    });
+
+    setSelectedDocNode((prev) => (prev && prev.id === nodeId ? finalizedNode : prev));
+
+    // Auto-trigger extraction workflow on file drop
+    triggerWorkflowExecution('file_drop', {
+      triggerType: 'file_drop',
+      triggerLabel: `file_drop: ${file.name}`,
+      file: {
+        name: file.name,
+        file_name: file.name,
+        size: file.size,
+        size_bytes: file.size,
+        type: file.type || 'application/octet-stream',
+        url: resolvedUrl,
+        cloudinaryUrl: resolvedUrl,
+        local_path: localFilePath,
+        localPath: localFilePath,
+        doc_id: nodeId,
+        b64: fileB64,
+        file_bytes_b64: fileB64,
+      },
+      doc_id: nodeId,
+      nodeId: nodeId,
+    });
   };
 
   const handleSelectProject = async (project) => {
@@ -1570,14 +2064,19 @@ def run(input_data, context=None):
         setWorkflows(fullProject.workflows);
       }
 
-      const loadedEngines = fullProject.engines && fullProject.engines.length > 0 ? fullProject.engines : ['resource_bridge', 'file_detection', 'document_extractor'];
-      const mergedEngines = Array.from(new Set(['resource_bridge', 'file_detection', 'document_extractor', ...loadedEngines]));
+      const loadedEngines = fullProject.engines && fullProject.engines.length > 0 ? fullProject.engines : ['resource_bridge', 'file_detection', 'document_extractor', 'node_context_builder'];
+      const mergedEngines = Array.from(new Set(['resource_bridge', 'file_detection', 'document_extractor', 'node_context_builder', ...loadedEngines]));
       setEngines(mergedEngines);
       if (fullProject.currentEngine) {
         setCurrentEngine(fullProject.currentEngine);
       }
       if (fullProject.enginesData) {
         setEnginesData(fullProject.enginesData);
+      }
+      const loadedExperiments = fullProject.experiments && fullProject.experiments.length > 0 ? fullProject.experiments : ['experiment_01'];
+      setExperiments(loadedExperiments);
+      if (fullProject.currentExperiment) {
+        setCurrentExperiment(fullProject.currentExperiment);
       }
       setWorkflowLogs(fullProject.workflowLogs || []);
 
@@ -1590,7 +2089,14 @@ def run(input_data, context=None):
           setWorkflowNodes(wfEntry.nodes);
         }
         if (wfEntry.threads) {
-          setWorkflowThreads(wfEntry.threads);
+          const cleanThreads = Array.isArray(wfEntry.threads)
+            ? wfEntry.threads.map((t) =>
+                t.condition && t.condition.includes('video')
+                  ? { ...t, condition: "category == 'image'" }
+                  : t
+              )
+            : wfEntry.threads;
+          setWorkflowThreads(cleanThreads);
         }
       } else if (DEFAULT_WORKFLOWS[activeWf]) {
         setWorkflowNodes(DEFAULT_WORKFLOWS[activeWf].nodes);
@@ -1761,9 +2267,151 @@ def run(input_data, context=None):
     return res;
   };
 
-  const handleExecuteInvestigationTool = (toolName, args) => {
+  const handleExecuteWorkflowTool = async (toolName, args) => {
+    const isCreating = toolName === 'create_workflow';
+    if (isCreating) {
+      setCurrentView('workflow');
+      setIsWorkflowAssembling(true);
+    }
+    try {
+      const proj = currentProjectRef.current;
+      const activeWorkflowId = currentWorkflowRef.current || currentWorkflow;
+      const res = await runWorkflowTool(
+        {
+          workflows: workflows || proj?.workflows || ['extraction', 'connection_synthesis'],
+          workflowsData: proj?.workflowsData || {},
+          currentWorkflow: activeWorkflowId,
+          engines: getAllEngineIds(engines, proj?.engines || []),
+          enginesData: proj?.enginesData || enginesData,
+          isWorkflowRunning: isWorkflowRunning,
+        },
+        toolName,
+        args || {}
+      );
+
+      if (res.updatedWorkflows || res.updatedWorkflowsData || res.currentWorkflow) {
+        const nextWorkflows = res.updatedWorkflows || workflows;
+        const nextWorkflowsData = res.updatedWorkflowsData || proj?.workflowsData || {};
+        const nextCurrentWorkflow = res.currentWorkflow || activeWorkflowId;
+
+        currentWorkflowRef.current = nextCurrentWorkflow;
+        if (res.updatedWorkflows) setWorkflows(nextWorkflows);
+        setCurrentWorkflow(nextCurrentWorkflow);
+        setCurrentView('workflow');
+
+        const activeData = nextWorkflowsData[nextCurrentWorkflow] || DEFAULT_WORKFLOWS[nextCurrentWorkflow];
+        if (activeData) {
+          if (activeData.nodes) setWorkflowNodes(activeData.nodes);
+          if (activeData.threads) setWorkflowThreads(activeData.threads);
+        }
+
+        if (currentProjectRef.current) {
+          const updatedProject = {
+            ...currentProjectRef.current,
+            workflows: nextWorkflows,
+            workflowsData: nextWorkflowsData,
+            currentWorkflow: nextCurrentWorkflow,
+            updatedAt: new Date().toISOString(),
+          };
+          currentProjectRef.current = updatedProject;
+          setCurrentProject(updatedProject);
+          saveProject(updatedProject).catch((err) => console.error('Failed to save workflow from tool:', err));
+        }
+      } else if (res.updatedWorkflowNodes || res.updatedWorkflowThreads) {
+        if (res.updatedWorkflowNodes) setWorkflowNodes(res.updatedWorkflowNodes);
+        if (res.updatedWorkflowThreads) setWorkflowThreads(res.updatedWorkflowThreads);
+
+        const targetWfId = currentWorkflowRef.current || currentWorkflow;
+        if (currentProjectRef.current) {
+          const updatedProject = {
+            ...currentProjectRef.current,
+            workflowsData: {
+              ...(currentProjectRef.current.workflowsData || {}),
+              [targetWfId]: {
+                ...(currentProjectRef.current.workflowsData?.[targetWfId] || {}),
+                nodes: res.updatedWorkflowNodes || workflowNodes,
+                threads: res.updatedWorkflowThreads || workflowThreads,
+              },
+            },
+            updatedAt: new Date().toISOString(),
+          };
+          currentProjectRef.current = updatedProject;
+          setCurrentProject(updatedProject);
+          saveProject(updatedProject).catch((err) => console.error('Failed to save workflow nodes from tool:', err));
+        }
+      }
+
+      return res;
+    } finally {
+      if (isCreating) {
+        setIsWorkflowAssembling(false);
+      }
+    }
+  };
+
+  const handleExecuteInvestigationTool = async (toolName, args) => {
+    // Intercept destructive / deletion tool calls for user permission
+    const isDeletion =
+      toolName === 'delete_node' ||
+      toolName === 'remove_connection' ||
+      toolName === 'delete_workflow' ||
+      toolName === 'delete_workflow_node' ||
+      toolName === 'delete_engine' ||
+      toolName.startsWith('delete_') ||
+      toolName.startsWith('remove_');
+
+    if (isDeletion) {
+      let itemLabel = toolName.replace(/_/g, ' ');
+      if (toolName === 'delete_node') {
+        const targetExp = args?.exploration_id || currentExploration;
+        const expNodes =
+          currentProjectRef.current?.explorationsData?.[targetExp]?.nodes || nodesRef.current || {};
+        if (args.delete_all || args.node_id === 'all' || args.node_id === '*') {
+          itemLabel = 'all exploration nodes';
+        } else if (Array.isArray(args.node_ids)) {
+          itemLabel = `${args.node_ids.length} exploration nodes`;
+        } else if (args.node_id) {
+          const n = expNodes[args.node_id];
+          const type = n?.category || n?.type || 'node';
+          itemLabel = `${type} "${n?.title || n?.name || args.node_id}"`;
+        }
+      } else if (toolName === 'remove_connection') {
+        itemLabel = `thread "${args.connection_id}"`;
+      } else if (toolName === 'delete_workflow') {
+        itemLabel = `workflow "${args.workflow_name || args.workflow_id || args.name || ''}"`;
+      } else if (toolName === 'delete_workflow_node') {
+        itemLabel = `workflow node "${args.node_id}"`;
+      } else if (toolName === 'delete_engine') {
+        itemLabel = `engine "${args.engine_id || args.name || ''}"`;
+      }
+
+      const approved = await new Promise((resolve) => {
+        setPendingToolApproval({
+          id: Math.random().toString(36).substring(2, 9),
+          toolName,
+          itemLabel,
+          args,
+          timeoutSeconds: 30,
+          resolve,
+        });
+      });
+
+      setPendingToolApproval(null);
+
+      if (!approved) {
+        return {
+          error: `User denied permission to execute ${toolName} for ${itemLabel}. Action not allowed.`,
+          denied: true,
+          status: 'denied',
+        };
+      }
+    }
+
     if (ENGINE_TOOL_NAMES.includes(toolName)) {
       return handleExecuteEngineTool(toolName, args);
+    }
+    if (WORKFLOW_TOOL_NAMES.includes(toolName)) {
+      return handleExecuteWorkflowTool(toolName, args);
     }
     const targetExp = args?.exploration_id || currentExploration;
     const currentExpNodes =
@@ -1822,7 +2470,14 @@ def run(input_data, context=None):
   };
 
   const isPredefinedWorkflow = Boolean(DEFAULT_WORKFLOWS[currentWorkflow]);
-  const currentWfDisplayName = currentProject?.workflowsData?.[currentWorkflow]?.name || currentWorkflow;
+  const currentWfDisplayName =
+    currentProject?.workflowsData?.[currentWorkflow]?.name ||
+    DEFAULT_WORKFLOWS[currentWorkflow]?.name ||
+    currentWorkflow;
+  const currentWfDescription =
+    currentProject?.workflowsData?.[currentWorkflow]?.description ||
+    DEFAULT_WORKFLOWS[currentWorkflow]?.description ||
+    '';
 
   // If on Projects starting page, render the Projects view
   if (currentView === 'projects') {
@@ -1849,6 +2504,17 @@ def run(input_data, context=None):
         </div>
       )}
 
+      {/* Floating right-side approval bar for AI deletions */}
+      <DeletionApprovalToast
+        approval={pendingToolApproval}
+        onDecision={(approved) => {
+          if (pendingToolApproval?.resolve) {
+            pendingToolApproval.resolve(approved);
+          }
+          setPendingToolApproval(null);
+        }}
+      />
+
       {/* Top Floating Navigation: Hamburger + Breadcrumb Nav Line */}
       <header className="top-nav-bar">
         <Sidebar
@@ -1874,6 +2540,12 @@ def run(input_data, context=None):
           onSelectWorkflow={handleSelectWorkflow}
           onCreateWorkflow={handleCreateWorkflow}
           onRenameWorkflow={handleRenameWorkflow}
+          experiments={experiments}
+          experimentsData={currentProject?.experimentsData || {}}
+          currentExperiment={currentExperiment}
+          onSelectExperiment={handleSelectExperiment}
+          onCreateExperiment={handleCreateExperiment}
+          onRenameExperiment={handleRenameExperiment}
           engines={engines}
           enginesData={enginesData}
           currentEngine={currentEngine}
@@ -1884,7 +2556,6 @@ def run(input_data, context=None):
             setCurrentView('engines');
           }}
           onOpenTools={() => setCurrentView('tools')}
-          onOpenSynthesis={() => setCurrentView('synthesis')}
           onOpenLogs={() => setCurrentView('logs')}
           isWorkflowRunning={isWorkflowRunning}
         />
@@ -1897,6 +2568,7 @@ def run(input_data, context=None):
           explorationName={currentExploration}
           workflowName={currentWorkflow}
           engineName={currentEngine}
+          experimentName={currentProject?.experimentsData?.[currentExperiment]?.name || currentExperiment}
           onGoToProjects={handleGoToProjects}
         />
       </header>
@@ -1906,6 +2578,9 @@ def run(input_data, context=None):
         currentExploration={currentExploration}
         nodes={nodes}
         onExecuteTool={handleExecuteInvestigationTool}
+        focusedNode={chatFocusNode}
+        onClearFocusedNode={() => setChatFocusNode(null)}
+        onWorkflowAssemblingChange={handleWorkflowAssemblingChange}
       />
 
       {/* Documents Page View, Tools Page View, Synthesis Page View, Logs Page View, Workflow Canvas View, or Exploration Canvas View */}
@@ -1945,8 +2620,12 @@ def run(input_data, context=None):
         />
       ) : currentView === 'tools' ? (
         <ToolsPage />
-      ) : currentView === 'synthesis' ? (
-        <SynthesisPage />
+      ) : currentView === 'experiment' ? (
+        <ExperimentPage
+          experimentId={currentExperiment}
+          experimentData={currentProject?.experimentsData?.[currentExperiment] || {}}
+          onUpdateExperimentData={handleUpdateExperimentData}
+        />
       ) : currentView === 'logs' ? (
         <LogsPage workflowLogs={workflowLogs} />
       ) : currentView === 'engines' ? (
@@ -1963,33 +2642,19 @@ def run(input_data, context=None):
         <>
           {/* Top-Right Workflow Controls & Minimap Cluster */}
           <div className="workflow-top-right-cluster">
-            {/* Delete Workflow Button (active for custom workflows, disabled/locked for predefined) */}
+            {/* Workflow Info & Details Button */}
             <button
               type="button"
-              className={`workflow-top-delete-btn ${isPredefinedWorkflow ? 'disabled' : ''}`}
-              onClick={() => {
-                if (!isPredefinedWorkflow) {
-                  setShowWorkflowDeleteModal(true);
-                }
-              }}
-              disabled={isPredefinedWorkflow}
-              title={
-                isPredefinedWorkflow
-                  ? 'Predefined workflows are protected and cannot be deleted'
-                  : `Delete workflow "${currentWfDisplayName}"`
-              }
+              className="workflow-top-info-btn"
+              onClick={() => setShowWorkflowInfoModal(true)}
+              title={`View details, components, and statistics for "${currentWfDisplayName}"`}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
               </svg>
-              <span>Delete</span>
-              {isPredefinedWorkflow && (
-                <svg className="btn-lock-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
-              )}
+              <span>Details</span>
             </button>
 
             {/* Top-Right Expandable Interactive Minimap */}
@@ -2017,6 +2682,9 @@ def run(input_data, context=None):
             viewportHeight={viewport.height}
             onCameraChange={setCamera}
           />
+
+          {/* Minimalist one-line top loading indicator (no text, zero clutter) */}
+          {isWorkflowAssembling && <div className="workflow-top-loading-line" />}
 
           {/* Workflow Canvas: Exact same dot grid canvas, camera, pan/zoom */}
           <DotGridCanvas
@@ -2050,27 +2718,33 @@ def run(input_data, context=None):
             })}
 
             {/* Live connecting thread when dragging from a join port */}
-            {liveConnectingThread && workflowNodes[liveConnectingThread.from] && (
-              <Thread
-                start={workflowNodes[liveConnectingThread.from]}
-                end={{
-                  x: liveConnectingThread.currentX,
-                  y: liveConnectingThread.currentY,
-                  width: 0,
-                  height: 0,
-                }}
-                isWorkflow={true}
-              />
-            )}
+            {liveConnectingThread &&
+              workflowNodes[liveConnectingThread.from] && (
+                <Thread
+                  start={workflowNodes[liveConnectingThread.from]}
+                  end={{
+                    x: liveConnectingThread.currentX,
+                    y: liveConnectingThread.currentY,
+                    width: 0,
+                    height: 0,
+                  }}
+                  isWorkflow={true}
+                />
+              )}
 
             {/* Render all workflow nodes (Input, Output, Agents, and Engines) */}
             {Object.values(workflowNodes).map((node) => {
-              const displayTitle = node.type === 'engine'
-                ? (getEngineDisplayName(node.engineId, enginesData) || node.title)
-                : node.title;
-              const displaySub = node.type === 'engine'
-                ? (getEngineDescription(node.engineId, enginesData) || node.description || node.sub || 'Custom processing engine')
-                : node.sub;
+              const displayTitle =
+                node.type === 'engine'
+                  ? getEngineDisplayName(node.engineId, enginesData) || node.title
+                  : node.title;
+              const displaySub =
+                node.type === 'engine'
+                  ? getEngineDescription(node.engineId, enginesData) ||
+                    node.description ||
+                    node.sub ||
+                    'Custom processing engine'
+                  : node.sub;
               return (
                 <WorkflowNode
                   key={node.id}
@@ -2083,7 +2757,11 @@ def run(input_data, context=None):
                   y={node.y}
                   width={node.width || 185}
                   zoom={camera.zoom}
-                  isSelected={selectedWorkflowNodeId === node.id || selectedAgentNodeId === node.id || selectedEngineNodeId === node.id}
+                  isSelected={
+                    selectedWorkflowNodeId === node.id ||
+                    selectedAgentNodeId === node.id ||
+                    selectedEngineNodeId === node.id
+                  }
                   onMove={handleWorkflowNodeMove}
                   onClick={handleWorkflowNodeClick}
                   onPortStart={handlePortStart}
@@ -2154,13 +2832,33 @@ def run(input_data, context=None):
             );
           })()}
 
+          {/* Workflow Info & Metrics Modal */}
+          <WorkflowInfoModal
+            isOpen={showWorkflowInfoModal}
+            workflowId={currentWorkflow}
+            workflowName={currentWfDisplayName}
+            workflowDescription={currentWfDescription}
+            workflowNodes={workflowNodes}
+            workflowThreads={workflowThreads}
+            isPredefined={isPredefinedWorkflow}
+            onClose={() => setShowWorkflowInfoModal(false)}
+            onUpdateMetadata={(meta) => handleUpdateWorkflowMetadata(currentWorkflow, meta)}
+            onDelete={() => {
+              setShowWorkflowInfoModal(false);
+              setShowWorkflowDeleteModal(true);
+            }}
+          />
+
           {/* Workflow Delete Confirmation Modal */}
           <WorkflowDeleteModal
             isOpen={showWorkflowDeleteModal}
             workflowName={currentWorkflow}
             displayName={currentWfDisplayName}
             onClose={() => setShowWorkflowDeleteModal(false)}
-            onConfirm={() => handleDeleteWorkflow(currentWorkflow)}
+            onConfirm={() => {
+              handleDeleteWorkflow(currentWorkflow);
+              setShowWorkflowDeleteModal(false);
+            }}
           />
         </>
       ) : (
@@ -2188,6 +2886,7 @@ def run(input_data, context=None):
             isOpen={!!selectedDocNode}
             onClose={() => setSelectedDocNode(null)}
             onRename={handleRenameNode}
+            onDelete={handleDeleteResourceNode}
           />
 
           {/* Exploration Dot Grid Canvas with Direct File Drag & Drop and Relationship Ports */}
@@ -2213,6 +2912,7 @@ def run(input_data, context=None):
                   status={conn.status || 'active'}
                   isRejected={conn.status === 'rejected'}
                   isAnalyzing={conn.status === 'analyzing'}
+                  isManual={Boolean(conn.is_manual || conn.source === 'manual')}
                   label={conn.label || conn.relationship_type || ''}
                   onClickThread={() => setSelectedExplorationThreadId(conn.id || conn.connection_id)}
                 />

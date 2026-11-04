@@ -78,7 +78,7 @@ export function getEngineDescription(engId, enginesData = {}) {
     return 'Verifies local OS cache or downloads from Cloudinary';
   }
   if (engId === 'file_detection') {
-    return 'Enterprise-grade binary & structural inspector';
+    return 'Binary and structural file inspector';
   }
   if (engId === 'document_extractor') {
     return 'Deterministic document parser with OCR & Vision escalation';
@@ -147,7 +147,7 @@ export function getEngineManifest(engId, enginesData = {}) {
   if (engId === 'file_detection') {
     return {
       name: 'File Detection',
-      description: 'Enterprise-grade binary & structural inspector',
+      description: 'Binary and structural file inspector',
       inputs: {
         file: { type: 'file', description: 'Uploaded raw binary stream' },
       },

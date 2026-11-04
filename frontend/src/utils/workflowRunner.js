@@ -2,6 +2,8 @@ import { getEngineInitialCode } from '../components/Engines/EnginesPage';
 import { DEFAULT_WORKFLOWS } from './workflowTemplates';
 import { NODE_LIFECYCLE_DEFINITIONS, NODE_INSTRUCTIONS } from '../tools/nodeLifecycleTools';
 import { ENGINE_TOOL_DEFINITIONS, ENGINE_INSTRUCTIONS } from '../tools/engine';
+import { WORKFLOW_TOOL_DEFINITIONS, WORKFLOW_INSTRUCTIONS } from '../tools/workflowTools';
+import { buildMetaToolSearchPayload } from '../tools/toolSearch';
 
 const toApiTool = (tool) => ({
   type: 'function',
@@ -13,40 +15,50 @@ const toApiTool = (tool) => ({
 });
 
 const ALL_AGENT_TOOLS = NODE_LIFECYCLE_DEFINITIONS.map(toApiTool);
-// Engine tools are opt-in per agent node (node.engineTools === true) so default workflows never create engines unprompted.
 const ENGINE_AGENT_TOOLS = ENGINE_TOOL_DEFINITIONS.map(toApiTool);
+const getWorkflowAgentTools = () => (WORKFLOW_TOOL_DEFINITIONS || []).map(toApiTool);
 
 /**
- * Finds the workflow configured for a specific trigger type.
- * Defaults to 'extraction' for file_drop and 'connection_synthesis' for node_connect.
+ * Finds all workflows configured for a specific trigger type to enable parallel execution.
  */
-export function findWorkflowForTrigger(project, triggerType) {
+export function findWorkflowsForTrigger(project, triggerType) {
   const workflowsData = project?.workflowsData || {};
+  const matched = [];
+
   for (const [wfId, wf] of Object.entries(workflowsData)) {
     if (wf?.nodes?.input?.trigger === triggerType) {
-      return { id: wfId, data: wf };
+      matched.push({ id: wfId, data: wf });
     }
   }
 
-  // Fallbacks based on predefined blueprints
+  if (matched.length > 0) {
+    return matched;
+  }
+
+  // Fallbacks based on predefined blueprints if nothing explicitly matched
   if (triggerType === 'file_drop') {
-    return {
+    return [{
       id: 'extraction',
       data: workflowsData.extraction || DEFAULT_WORKFLOWS.extraction,
-    };
+    }];
   }
   if (triggerType === 'node_connect') {
-    return {
+    return [{
       id: 'connection_synthesis',
       data: workflowsData.connection_synthesis || DEFAULT_WORKFLOWS.connection_synthesis,
-    };
+    }];
   }
 
   const firstWfId = project?.workflows?.[0] || 'extraction';
-  return {
+  return [{
     id: firstWfId,
     data: workflowsData[firstWfId] || DEFAULT_WORKFLOWS[firstWfId],
-  };
+  }];
+}
+
+export function findWorkflowForTrigger(project, triggerType) {
+  const list = findWorkflowsForTrigger(project, triggerType);
+  return list[0] || null;
 }
 
 /**
@@ -100,52 +112,167 @@ async function executePythonEngine(code, inputData) {
   }
 }
 
+function sanitizeContextForPrompt(obj, depth = 0) {
+  if (!obj || typeof obj !== 'object' || depth > 3) return {};
+  const cleaned = {};
+  const blockedKeys = new Set([
+    'file',
+    'file_bytes_b64',
+    'b64',
+    'raw_file',
+    'binary',
+    'header_bytes',
+    'initial_input',
+    'previous_output',
+  ]);
+  for (const [key, val] of Object.entries(obj)) {
+    if (blockedKeys.has(key)) continue;
+    if (typeof val === 'string') {
+      if (val.length > 2000 || val.startsWith('data:') || /^[A-Za-z0-9+/=]{80,}$/.test(val.slice(0, 80))) {
+        continue;
+      }
+      cleaned[key] = val;
+    } else if (typeof val === 'number' || typeof val === 'boolean') {
+      cleaned[key] = val;
+    } else if (Array.isArray(val)) {
+      cleaned[key] = val
+        .slice(0, 10)
+        .filter((item) => typeof item !== 'string' || item.length < 500);
+    } else if (typeof val === 'object' && val !== null) {
+      const sub = sanitizeContextForPrompt(val, depth + 1);
+      if (Object.keys(sub).length > 0) cleaned[key] = sub;
+    }
+  }
+  return cleaned;
+}
+
 /**
  * Executes a model agent against the Meta Model API via the local runner (http://127.0.0.1:8001/api/agents/run).
  */
-async function executeAgentModel({ modelId, systemPrompt, temperature, reasoningEffort, inputPayload, targetTitle, tools }) {
+/** One line describing what a tool call did, so the model can see its own earlier actions. */
+function summarizeToolAction(toolName, args, result) {
+  if (!result || result.error) return `${toolName}: FAILED - ${result?.error || 'no result'}`;
+  if (toolName === 'create_node' && result.node) {
+    return `create_node: created ${result.node.type} node "${result.node.title}" (id: ${result.node.id})`;
+  }
+  if (toolName === 'create_nodes' && Array.isArray(result.nodes)) {
+    return `create_nodes: created ${result.nodes.length} nodes: ${result.nodes.map((n) => `"${n.title}" (${n.type}, id: ${n.id})`).join('; ')}`;
+  }
+  if (toolName === 'connect_nodes' && result.connected) {
+    return `connect_nodes: connected ${args?.source_node_id} to ${result.count} node(s)`;
+  }
+  const { updatedNodes, updatedConnections, ...rest } = result;
+  void updatedNodes;
+  void updatedConnections;
+  return `${toolName}: ${JSON.stringify(rest).slice(0, 300)}`;
+}
+
+async function executeAgentModel({ modelId, systemPrompt, agentPrompt, temperature, reasoningEffort, inputPayload, targetTitle, tools, progress }) {
   const start = performance.now();
   try {
-    const docName = inputPayload.file_name || inputPayload.document_name || inputPayload.file?.name || 'Document';
-    const docNodeId = inputPayload.document_node_id || inputPayload.doc_id || inputPayload.nodeId || '';
-    const upstreamSynthesis = inputPayload.agent_synthesis || inputPayload.synthesis || '';
-    const hasRawFile = Boolean(inputPayload.file || inputPayload.file_bytes_b64 || inputPayload.include_raw_file);
-    const textContent = inputPayload.extracted_text || (hasRawFile ? inputPayload.text : '') || '';
+    const isComparison = Boolean(
+      inputPayload.prompt_instruction ||
+      inputPayload.source_node ||
+      inputPayload.target_node ||
+      inputPayload.node_pair ||
+      targetTitle?.toLowerCase().includes('relationship')
+    );
 
-    const docHeader = docNodeId
-      ? `Source Document: ${docName} (Canvas Node ID: "${docNodeId}")`
-      : `Source Document: ${docName}`;
-    const promptParts = [docHeader];
-    if (upstreamSynthesis) {
-      promptParts.push(`Upstream Analysis & Key Findings:\n${upstreamSynthesis}`);
-    }
-    if (textContent) {
-      promptParts.push(`Extracted Document Content:\n${textContent.slice(0, 15000)}`);
-    }
-    if (inputPayload.metadata && Object.keys(inputPayload.metadata).length > 0) {
-      promptParts.push(
-        'Input Metadata:\n' +
-          Object.entries(inputPayload.metadata)
-            .map(([k, v]) => `- ${k}: ${v}`)
-            .join('\n')
-      );
-    }
+    const promptParts = [];
 
-    if (tools && tools.length > 0) {
-      const toolNames = tools.map((t) => t.function?.name || t.name);
-      const hasBatch = toolNames.includes('create_nodes');
-      const createAction = hasBatch
-        ? 'call the "create_nodes" tool with an array of nodes to create them all simultaneously in batch'
-        : 'call the "create_node" tool to populate the canvas';
-      const connectInstruction = docNodeId
-        ? `Hierarchy & Connection Rules:
-1. Connect main topic, finding, and claim nodes to the source document (connect_to_source_id: "${docNodeId}").
-2. Connect all subtopics directly to their parent topic node ID (set connect_to_source_id: "<topic_node_id>"), not to the document.
-3. Call "connect_nodes" where necessary to establish relationships between related findings, claims, and evidence.`
-        : `Hierarchy & Connection Rules: Connect all subtopics directly to their parent topic node ID. Call "connect_nodes" to create relationships between related nodes.`;
-      promptParts.push(`Please synthesize the essential structure from the document analysis. Focus strictly on necessary topics and important subtopics. Do not create nodes for minor details or every small mention; only extract the primary conceptual topics, the most important subtopics, and crucial findings or evidence.\n\n${createAction}.\n\n${connectInstruction}`);
+    if (isComparison) {
+      if (inputPayload.prompt_instruction) {
+        promptParts.push(inputPayload.prompt_instruction);
+      } else {
+        const sNode = inputPayload.source_node || inputPayload.node_pair?.source_node || {};
+        const tNode = inputPayload.target_node || inputPayload.node_pair?.target_node || {};
+        promptParts.push(
+          `Analyze the relationship between Node A and Node B:\n` +
+          `- Node A (${sNode.type || 'finding'}): "${sNode.title || sNode.name || 'Untitled'}" -> ${sNode.description || sNode.content || ''}\n` +
+          `- Node B (${tNode.type || 'finding'}): "${tNode.title || tNode.name || 'Untitled'}" -> ${tNode.description || tNode.content || ''}\n\n` +
+          `Determine if a valid connection exists. Output JSON: {"connected": boolean, "relationship": string, "label": string, "explanation": string}`
+        );
+      }
     } else {
-      promptParts.push('Please analyze the document and findings thoroughly and provide your factual synthesis.');
+      const docName = inputPayload.file_name || inputPayload.document_name || inputPayload.file?.name || '';
+      const docNodeId = inputPayload.document_node_id || inputPayload.doc_id || inputPayload.nodeId || '';
+      const upstreamSynthesis = inputPayload.agent_synthesis || inputPayload.synthesis || '';
+      const hasRawFile = Boolean(inputPayload.file || inputPayload.file_bytes_b64 || inputPayload.include_raw_file);
+      const textContent = inputPayload.extracted_text || (hasRawFile ? inputPayload.text : '') || '';
+
+      const isVisionAgent =
+        targetTitle?.toLowerCase().includes('vision') ||
+        modelId?.toLowerCase().includes('vision') ||
+        Boolean(inputPayload.is_vision || inputPayload.escalation?.needs_vision_model);
+
+      if (agentPrompt && agentPrompt.trim()) {
+        promptParts.push(`Primary Assignment / Instructions:\n${agentPrompt.trim()}`);
+      }
+
+      if (docNodeId || (docName && docName !== 'Document')) {
+        promptParts.push(docNodeId ? `Source Document: ${docName || 'Document'} (Canvas Node ID: "${docNodeId}")` : `Source Document: ${docName}`);
+      }
+
+      if (upstreamSynthesis) {
+        promptParts.push(`Upstream Analysis & Key Findings:\n${upstreamSynthesis}`);
+      }
+      if (textContent) {
+        promptParts.push(`Extracted Document Content:\n${textContent.slice(0, 15000)}`);
+      }
+      if (inputPayload.metadata && Object.keys(inputPayload.metadata).length > 0) {
+        promptParts.push(
+          'Input Metadata:\n' +
+            Object.entries(inputPayload.metadata)
+              .map(([k, v]) => `- ${k}: ${v}`)
+              .join('\n')
+        );
+      }
+
+      // If general structured context exists without standard doc fields, format cleanly
+      if (!textContent && !upstreamSynthesis && !docNodeId) {
+        const sanitizedContext = sanitizeContextForPrompt(inputPayload);
+        if (Object.keys(sanitizedContext).length > 0) {
+          promptParts.push(`Context Data:\n${JSON.stringify(sanitizedContext, null, 2)}`);
+        }
+      }
+
+      // Earlier turns of this same run: what the model said and did, so it does not start over.
+      if (Array.isArray(progress) && progress.length > 0) {
+        const done = progress
+          .map((t) => {
+            const said = t.said ? `You said: "${t.said.slice(0, 400)}"\n` : '';
+            return `Turn ${t.turn}:\n${said}Actions:\n${t.actions.map((a) => `- ${a}`).join('\n')}`;
+          })
+          .join('\n\n');
+        promptParts.push(
+          `Progress so far in this run (these actions are already DONE on the canvas):\n${done}\n\n` +
+          `Do not repeat or recreate anything listed above. Compare it with your assignment: if something is still missing, do only the remaining steps; if the assignment is complete, reply with a short summary and call no tools.`
+        );
+      }
+
+      if (isVisionAgent) {
+        promptParts.push(`Please visually transcribe and analyze the attached document: "${docName || 'Document'}". Extract all visible text, headings, figures, tables, and visual structure in detail.`);
+      } else if (tools && tools.length > 0) {
+        const toolNames = tools.map((t) => t.function?.name || t.name);
+        const hasBatch = toolNames.includes('create_nodes');
+        const hasLifecycle = hasBatch || toolNames.includes('create_node');
+
+        let toolGuidance = '';
+        if (hasLifecycle) {
+          const createAction = hasBatch
+            ? 'call the "create_nodes" tool with an array of nodes to create them all simultaneously in batch'
+            : 'call the "create_node" tool to populate the canvas';
+          const connectInstruction = docNodeId
+            ? `\nConnection Directive: When creating nodes linked to the document, set connect_to_source_id: "${docNodeId}". If creating subtopics under parent topics, set connect_to_source_id: "<topic_node_id>".`
+            : '';
+          toolGuidance = `Please fulfill the assignment instructions above. You can ${createAction} as requested.${connectInstruction}`;
+        } else {
+          toolGuidance = `Please fulfill the assignment instructions above and invoke any appropriate tools as needed.`;
+        }
+        promptParts.push(toolGuidance);
+      } else {
+        promptParts.push('Please analyze the provided context thoroughly and carry out your assignment.');
+      }
     }
     const promptText = promptParts.join('\n\n');
 
@@ -160,6 +287,7 @@ async function executeAgentModel({ modelId, systemPrompt, temperature, reasoning
         reasoning_effort: reasoningEffort || 'minimal',
         input_data: inputPayload,
         tools: tools || undefined,
+        include_file: Boolean(inputPayload.file || inputPayload.file_bytes_b64 || inputPayload.include_raw_file),
       }),
     });
 
@@ -181,17 +309,60 @@ async function executeAgentModel({ modelId, systemPrompt, temperature, reasoning
       };
     }
 
+    const pythonError = data.error || `Agent model call returned HTTP ${res.status}`;
+
+    // Fallback: If agent runner failed, try calling python chat completion on local server
+    try {
+      const directMessages = [
+        { role: 'system', content: systemPrompt || 'You are an AI research assistant.' },
+        { role: 'user', content: promptText },
+      ];
+      const directTools = Array.isArray(tools) && tools.length > 0 ? tools : undefined;
+      const directRes = await fetch('http://127.0.0.1:8001/api/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: modelId || 'muse-spark-1.3',
+          messages: directMessages,
+          tools: directTools,
+          ...(modelId?.startsWith('muse-spark') || modelId?.startsWith('muse-wonder') ? { reasoning_effort: 'minimal' } : {}),
+        }),
+      });
+
+      if (directRes.ok) {
+        const directData = await directRes.json();
+        const choice = directData.choices?.[0];
+        const msg = choice?.message || {};
+        const replyText = (msg.content || '').trim();
+        const tCalls = msg.tool_calls || [];
+        return {
+          status: 'success',
+          httpCode: 200,
+          output: {
+            text: replyText,
+            tool_calls: tCalls,
+            model: directData.model || modelId,
+          },
+          response: replyText,
+          durationMs: Math.round(performance.now() - start),
+          server: 'local-python-chat',
+        };
+      }
+    } catch (fallbackErr) {
+      console.warn('Local Python chat fallback failed:', fallbackErr);
+    }
+
     return {
       status: 'error',
       httpCode: res.status,
-      error: data.error || `Agent model call returned HTTP ${res.status}`,
+      error: pythonError,
       durationMs: data.duration_ms || elapsed,
     };
   } catch (err) {
     return {
       status: 'error',
       httpCode: 503,
-      error: `Agent connection failed: ${err.message}`,
+      error: `Local Python server offline: ${err.message || 'Cannot connect to http://127.0.0.1:8001'}`,
       durationMs: Math.round(performance.now() - start),
     };
   }
@@ -202,9 +373,14 @@ function evaluateCondition(conditionStr, payload) {
   const expr = conditionStr.trim();
 
   const fileName = payload.file?.name || payload.file_name || payload.name || '';
+  const isBlocked = /\.(mp4|webm|mov|avi|mkv|flv|wmv|m4v|gif)$/i.test(fileName);
+  if (isBlocked) {
+    return false;
+  }
+
   const rawCat = payload.category || (
     /\.(pdf|docx?|txt|rtf|md|csv|tsv|json|log)$/i.test(fileName) ? 'document' :
-    /\.(png|jpe?g|webp|gif|svg|bmp|tiff?)$/i.test(fileName) ? 'image' :
+    /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(fileName) ? 'image' :
     /\.(mp3|wav|ogg|m4a|flac)$/i.test(fileName) ? 'audio' : 'document'
   );
 
@@ -259,12 +435,16 @@ export async function executeWorkflow({
     : Object.values(workflowData?.threads || {});
 
   const runStartTime = Date.now();
-  const runId = `run_${Date.now()}`;
+  const runId = `run_${workflowId || 'wf'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
   // Build clean run nodes map matching the fixed visual layout
   const runNodes = {};
   Object.entries(wfNodes).forEach(([nId, node]) => {
     runNodes[nId] = {
+      // Keep the node's full configuration (systemPrompt, temperature, reasoningEffort, contextSources,
+      // tools, engineTools, ...). The run reads these from runNodes; copying only a few fields made every
+      // agent ignore its prompt, context toggles and tool access.
+      ...node,
       id: nId,
       title: node.title || nId,
       sub: node.sub || node.engineId || node.modelName || '',
@@ -323,7 +503,7 @@ export async function executeWorkflow({
   const fileName = rawFile.name || triggerPayload.file_name || 'document';
   const detectedCategory = (
     /\.(pdf|docx?|txt|rtf|md|csv)$/i.test(fileName) ? 'document' :
-    /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(fileName) ? 'image' :
+    /\.(png|jpe?g|webp|bmp)$/i.test(fileName) ? 'image' :
     /\.(mp3|wav|ogg|m4a|flac)$/i.test(fileName) ? 'audio' : 'document'
   );
 
@@ -348,6 +528,18 @@ export async function executeWorkflow({
     ...mergedMetadata,
     sourceNode: triggerPayload.sourceNode,
     targetNode: triggerPayload.targetNode,
+    source_node: triggerPayload.source_node || triggerPayload.sourceNode,
+    target_node: triggerPayload.target_node || triggerPayload.targetNode,
+    node_pair: triggerPayload.node_pair || (
+      (triggerPayload.sourceNode || triggerPayload.source_node)
+        ? {
+            source_node: triggerPayload.source_node || triggerPayload.sourceNode,
+            target_node: triggerPayload.target_node || triggerPayload.targetNode,
+            exploration_id: triggerPayload.exploration_id || triggerPayload.explorationId || 'exploration_01',
+          }
+        : null
+    ),
+    exploration_id: triggerPayload.exploration_id || triggerPayload.explorationId || 'exploration_01',
     timestamp: new Date().toISOString(),
   };
 
@@ -378,6 +570,12 @@ export async function executeWorkflow({
       category: detectedCategory,
       file_name: fileName,
       status: 'accepted',
+      source_node: initialPayload.source_node,
+      target_node: initialPayload.target_node,
+      sourceNode: initialPayload.sourceNode,
+      targetNode: initialPayload.targetNode,
+      node_pair: initialPayload.node_pair,
+      exploration_id: initialPayload.exploration_id,
       ...(Object.keys(mergedMetadata).length > 0 ? { metadata: mergedMetadata } : {}),
     };
     onProgress?.(runRecord);
@@ -482,19 +680,22 @@ export async function executeWorkflow({
         delete activeNodeInput.previous_metadata;
       }
 
-      activeNodeInput.doc_id = activeNodeInput.doc_id || initialPayload.doc_id || currentPayload.doc_id;
-      activeNodeInput.file_name = activeNodeInput.file_name || initialPayload.file_name || currentPayload.file_name;
+      if (inputMetadata || inputFile) {
+        activeNodeInput.doc_id = activeNodeInput.doc_id || initialPayload.doc_id || currentPayload.doc_id;
+        activeNodeInput.file_name = activeNodeInput.file_name || initialPayload.file_name || currentPayload.file_name;
+      }
       sourceScope = inputFile && previousOutput ? 'both' : (inputFile ? 'original' : 'previous');
     } else {
+      const isVisionAgent =
+        targetNode.title?.toLowerCase().includes('vision') ||
+        targetNode.modelId?.toLowerCase().includes('vision') ||
+        targetNode.modelId?.toLowerCase().includes('spark') ||
+        Boolean(targetNode.is_vision);
+
       sourceScope = targetNode.inputSource || (
         (targetNode.id === 'engine_bridge' || targetNode.id === 'engine_1') ? 'original' :
-        (targetNode.type === 'agent' ? 'both' : 'previous')
+        (targetNode.type === 'agent' ? (isVisionAgent ? 'both' : 'previous') : 'previous')
       );
-
-      // Default final knowledge synthesis agent to 'previous' output + metadata (never send raw file to final synthesis agent)
-      if (targetNode.id === 'agent_3' || targetNode.title?.toLowerCase().includes('synthesis')) {
-        sourceScope = 'previous';
-      }
 
       if (sourceScope === 'original') {
         activeNodeInput = { ...initialPayload };
@@ -523,6 +724,12 @@ export async function executeWorkflow({
           document_name: currentPayload.document_name || initialPayload.document_name || initialPayload.file_name,
           category: currentPayload.category || initialPayload.category,
           size_bytes: currentPayload.size_bytes || initialPayload.size_bytes,
+          source_node: currentPayload.source_node || initialPayload.source_node,
+          target_node: currentPayload.target_node || initialPayload.target_node,
+          sourceNode: currentPayload.sourceNode || initialPayload.sourceNode,
+          targetNode: currentPayload.targetNode || initialPayload.targetNode,
+          node_pair: currentPayload.node_pair || initialPayload.node_pair,
+          exploration_id: currentPayload.exploration_id || initialPayload.exploration_id,
           metadata: {
             doc_id: currentPayload.doc_id || initialPayload.doc_id,
             file_name: currentPayload.file_name || initialPayload.file_name,
@@ -600,19 +807,29 @@ export async function executeWorkflow({
           ? 'muse-voice-transcribe-1.0'
           : 'muse-wonder-1.0');
 
-      // Tool access is the node's "Tool Access" setting (tools: true/false). Saved synthesis agents that
-      // predate the setting keep their tools. Agents without tools only return text: with tools attached
-      // the server sends a text-only chat request, so the document file would never reach the model.
-      const isSynthesisOrCanvasAgent =
+      // 1. Tool availability: Default tools enabled across all workflows unless explicitly false
+      const isToolAccessEnabled =
         typeof targetNode.tools === 'boolean'
           ? targetNode.tools
-          : Boolean(targetNode.title?.toLowerCase().includes('synthesis')) || targetNode.id === 'agent_3';
+          : true;
 
-      const effectiveAgentTools = !isSynthesisOrCanvasAgent
-        ? undefined
-        : targetNode.engineTools === true
-        ? [...ALL_AGENT_TOOLS, ...ENGINE_AGENT_TOOLS]
-        : ALL_AGENT_TOOLS;
+      let effectiveAgentTools = undefined;
+      if (isToolAccessEnabled) {
+        let toolPool = [...ALL_AGENT_TOOLS];
+        if (targetNode.engineTools === true || targetNode.toolNamespaces?.includes('engine')) {
+          toolPool.push(...ENGINE_AGENT_TOOLS);
+        }
+        if (targetNode.workflowTools === true || targetNode.toolNamespaces?.includes('workflow')) {
+          toolPool.push(...getWorkflowAgentTools());
+        }
+
+        if (Array.isArray(targetNode.selectedTools) && targetNode.selectedTools.length > 0) {
+          const selectedSet = new Set(targetNode.selectedTools);
+          effectiveAgentTools = toolPool.filter((t) => selectedSet.has(t.function?.name || t.name));
+        } else {
+          effectiveAgentTools = toolPool;
+        }
+      }
 
       const targetExploration = project?.currentExploration || 'exploration_01';
       const expNodes =
@@ -631,7 +848,9 @@ export async function executeWorkflow({
         activeNodeInput.nodeId ||
         '';
 
-      if (!resolvedDocNodeId || !expNodes[resolvedDocNodeId]) {
+      const wantsFileContext = !contextSources || (contextSources.inputMetadata || contextSources.inputFile);
+
+      if (wantsFileContext && (!resolvedDocNodeId || !expNodes[resolvedDocNodeId])) {
         const foundEntry = Object.entries(expNodes).find(
           ([id, n]) =>
             (n.type === 'document' || n.category === 'resource') &&
@@ -643,16 +862,21 @@ export async function executeWorkflow({
       }
 
       let effectiveSystemPrompt = targetNode.systemPrompt || 'You are an AI research assistant.';
-      if (isSynthesisOrCanvasAgent) {
-        const docDirective = resolvedDocNodeId
+
+      if (isToolAccessEnabled) {
+        const docDirective = wantsFileContext && resolvedDocNodeId
           ? `The source document "${docName}" is active on the canvas with Node ID: "${resolvedDocNodeId}".`
           : '';
 
-        effectiveSystemPrompt += `\n\nCANVAS ACTION DIRECTIVE: The active exploration canvas is "${targetExploration}".\n${docDirective}\n\n${NODE_INSTRUCTIONS}\n\nEXTRACTION DIRECTIVE:\n- Focus on necessary topics and important subtopics.\n- Avoid exhaustive lists, minor details, or granular side-notes; extract only the core conceptual themes and the most meaningful subtopics.\n- Prioritize clarity, relevance, and clean hierarchy over sheer volume.\nImmediately create all nodes on exploration_id "${targetExploration}".`;
+        effectiveSystemPrompt += `\n\nCANVAS ACTION DIRECTIVE: The active exploration canvas is "${targetExploration}".\n${docDirective}\n\n${NODE_INSTRUCTIONS}`;
       }
 
-      if (targetNode.engineTools === true) {
+      if (targetNode.engineTools === true || targetNode.toolNamespaces?.includes('engine')) {
         effectiveSystemPrompt += `\n\n${ENGINE_INSTRUCTIONS}`;
+      }
+
+      if (targetNode.workflowTools === true || targetNode.toolNamespaces?.includes('workflow')) {
+        effectiveSystemPrompt += `\n\n${WORKFLOW_INSTRUCTIONS}`;
       }
 
       const incomingText =
@@ -668,56 +892,98 @@ export async function executeWorkflow({
         doc_id: resolvedDocNodeId || activeNodeInput.doc_id,
       };
 
-      const res = await executeAgentModel({
-        modelId: agentModelId,
-        systemPrompt: effectiveSystemPrompt,
-        temperature: targetNode.temperature,
-        reasoningEffort: targetNode.reasoningEffort,
-        inputPayload: agentPayload,
-        targetTitle: targetNode.title,
-        tools: effectiveAgentTools,
-      });
+      const executedTools = [];
+      const createdNodeIds = [];
+      let totalDurationMs = 0;
+      let finalSynthesis = '';
+      let turnInputPayload = { ...agentPayload };
+      const progressLog = [];
+      const MAX_AGENT_TURNS = 4;
+      let lastSuccessRes = null;
 
-      if (res.status === 'success') {
-        const executedTools = [];
-        const createdNodeIds = [];
-        if (Array.isArray(res.output?.tool_calls) && res.output.tool_calls.length > 0) {
-          for (const tc of res.output.tool_calls) {
-            let parsedArgs = {};
-            try {
-              parsedArgs = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : (tc.arguments || {});
-            } catch {
-              parsedArgs = {};
-            }
-            if (!parsedArgs.exploration_id) {
-              parsedArgs.exploration_id = targetExploration;
-            }
-            if (tc.name === 'create_node' && resolvedDocNodeId && !parsedArgs.connect_to_source_id && !parsedArgs.source_node_id) {
-              if (parsedArgs.node_type !== 'subtopic') {
-                parsedArgs.connect_to_source_id = resolvedDocNodeId;
-              }
-            }
-            if (tc.name === 'create_nodes' && resolvedDocNodeId) {
-              if (Array.isArray(parsedArgs.nodes)) {
-                parsedArgs.nodes.forEach((n) => {
-                  if (!n.connect_to_source_id && !n.source_node_id && n.node_type !== 'subtopic') {
-                    n.connect_to_source_id = resolvedDocNodeId;
-                  }
-                });
-              }
-            }
-            const toolResult = await onExecuteTool?.(tc.name, parsedArgs);
-            if (tc.name === 'create_node' && toolResult?.node?.id) {
-              createdNodeIds.push(toolResult.node.id);
-            } else if (tc.name === 'create_nodes' && Array.isArray(toolResult?.nodes)) {
-              toolResult.nodes.forEach((n) => createdNodeIds.push(n.id));
-            }
-            executedTools.push({
-              toolName: tc.name,
-              args: parsedArgs,
-              result: toolResult,
-            });
+      for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
+        const res = await executeAgentModel({
+          modelId: agentModelId,
+          systemPrompt: effectiveSystemPrompt,
+          agentPrompt: targetNode.systemPrompt || '',
+          temperature: targetNode.temperature,
+          reasoningEffort: targetNode.reasoningEffort,
+          inputPayload: turnInputPayload,
+          targetTitle: targetNode.title,
+          tools: effectiveAgentTools,
+          progress: progressLog,
+        });
+
+        if (res.status !== 'success') {
+          if (turn === 0) {
+            targetNode.status = 'failed';
+            thread.status = 'failed';
+            const failureReason = res.error || `Agent execution failed (HTTP ${res.httpCode || 500})`;
+            targetNode.error = failureReason;
+            targetNode.processInfo = {
+              step: `Agent execution failed (HTTP ${res.httpCode || 500}): ${failureReason}`,
+              executionTime: `${res.durationMs || 0}ms`,
+              error: failureReason,
+            };
+            hasFailed = true;
+            onProgress?.(runRecord);
+            break;
           }
+          break;
+        }
+
+        lastSuccessRes = res;
+        totalDurationMs += res.durationMs || 0;
+
+        const currentToolCalls = Array.isArray(res.output?.tool_calls) ? res.output.tool_calls : [];
+
+        if (currentToolCalls.length === 0) {
+          finalSynthesis = res.output?.synthesis || res.response || finalSynthesis;
+          break;
+        }
+
+        const turnToolResults = [];
+        for (const tc of currentToolCalls) {
+          let parsedArgs = {};
+          try {
+            parsedArgs = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : (tc.arguments || {});
+          } catch {
+            parsedArgs = {};
+          }
+          if (!parsedArgs.exploration_id) {
+            parsedArgs.exploration_id = targetExploration;
+          }
+          if (tc.name === 'create_node' && resolvedDocNodeId && !parsedArgs.connect_to_source_id && !parsedArgs.source_node_id) {
+            if (parsedArgs.node_type !== 'subtopic') {
+              parsedArgs.connect_to_source_id = resolvedDocNodeId;
+            }
+          }
+          if (tc.name === 'create_nodes' && resolvedDocNodeId) {
+            if (Array.isArray(parsedArgs.nodes)) {
+              parsedArgs.nodes.forEach((n) => {
+                if (!n.connect_to_source_id && !n.source_node_id && n.node_type !== 'subtopic') {
+                  n.connect_to_source_id = resolvedDocNodeId;
+                }
+              });
+            }
+          }
+
+          const toolResult = await onExecuteTool?.(tc.name, parsedArgs);
+          if (tc.name === 'create_node' && toolResult?.node?.id) {
+            createdNodeIds.push(toolResult.node.id);
+          } else if (tc.name === 'create_nodes' && Array.isArray(toolResult?.nodes)) {
+            toolResult.nodes.forEach((n) => createdNodeIds.push(n.id));
+          }
+
+          executedTools.push({
+            toolName: tc.name,
+            args: parsedArgs,
+            result: toolResult,
+          });
+          turnToolResults.push({
+            toolName: tc.name,
+            result: toolResult,
+          });
         }
 
         // Link only unconnected root topic/finding nodes to the source document (never subtopics)
@@ -728,9 +994,7 @@ export async function executeWorkflow({
           const unconnectedRootIds = createdNodeIds.filter((nid) => {
             const nodeObj = currentExp.nodes?.[nid];
             if (!nodeObj) return false;
-            // Never connect subtopics to the document
             if (nodeObj.type === 'subtopic') return false;
-            // Check if already connected
             const hasConn = currentConns.some((c) => c.source_node_id === nid || c.target_node_id === nid);
             return !hasConn;
           });
@@ -753,56 +1017,61 @@ export async function executeWorkflow({
           }
         }
 
-        targetNode.status = 'completed';
-        thread.status = 'completed';
-        targetNode.inputData = {
-          document: activeNodeInput.document_name || activeNodeInput.file_name || activeNodeInput.file?.name,
-          source_text: incomingText,
-          category: activeNodeInput.category,
-          input_source: sourceScope,
-        };
+        if (res.output?.synthesis || res.response) {
+          finalSynthesis = res.output?.synthesis || res.response;
+        }
 
-        const toolNote = executedTools.length > 0
-          ? ` [invoked ${executedTools.length} tool(s): ${executedTools.map((t) => t.toolName).join(', ')}]`
-          : '';
+        // Record this turn so the next request shows the model what it already did.
+        progressLog.push({
+          turn: turn + 1,
+          said: (res.output?.synthesis || res.response || '').trim(),
+          actions: currentToolCalls.map((tc, i) => {
+            const executed = executedTools[executedTools.length - currentToolCalls.length + i];
+            return summarizeToolAction(tc.name, executed?.args, executed?.result);
+          }),
+        });
+      }
 
-        targetNode.processInfo = {
-          step: `Agent '${targetNode.title}' executed via Meta API (${agentModelId}) (HTTP 200)${toolNote} [source: ${sourceScope}]`,
-          executionTime: `${res.durationMs}ms`,
-        };
-        const finalSynthesis =
-          res.output?.synthesis ||
-          res.output?.agent_synthesis ||
-          (executedTools.length > 0
-            ? `Synthesized document findings and created ${executedTools.length} nodes on exploration canvas '${targetExploration}'.`
-            : 'Analysis complete.');
-
-        targetNode.outputData = {
-          ...res.output,
-          synthesis: finalSynthesis,
-          agent_synthesis: finalSynthesis,
-          executedTools,
-        };
-        currentPayload = { ...currentPayload, ...targetNode.outputData };
-      } else {
-        targetNode.status = 'failed';
-        thread.status = 'failed';
-        targetNode.inputData = {
-          document: activeNodeInput.document_name || activeNodeInput.file_name || activeNodeInput.file?.name,
-          source_text: incomingText,
-          category: activeNodeInput.category,
-          input_source: sourceScope,
-        };
-        targetNode.processInfo = {
-          step: `Agent '${targetNode.title}' failed (HTTP ${res.httpCode || 500}): ${res.error}`,
-          executionTime: `${res.durationMs}ms`,
-          error: res.error,
-        };
-        targetNode.outputData = null;
-        hasFailed = true;
-        onProgress?.(runRecord);
+      if (hasFailed) {
         break;
       }
+
+      targetNode.status = 'completed';
+      thread.status = 'completed';
+      targetNode.inputData = {
+        document: activeNodeInput.document_name || activeNodeInput.file_name || activeNodeInput.file?.name,
+        source_text: incomingText,
+        category: activeNodeInput.category,
+        input_source: sourceScope,
+      };
+
+      const toolNote = executedTools.length > 0
+        ? ` [invoked ${executedTools.length} tool(s): ${executedTools.map((t) => t.toolName).join(', ')}]`
+        : '';
+
+      targetNode.processInfo = {
+        step: `Agent '${targetNode.title}' executed via Meta API (${agentModelId}) (HTTP 200)${toolNote} [source: ${sourceScope}]`,
+        executionTime: `${totalDurationMs}ms`,
+      };
+
+      if (!finalSynthesis && lastSuccessRes) {
+        finalSynthesis =
+          lastSuccessRes.output?.synthesis ||
+          lastSuccessRes.output?.agent_synthesis ||
+          lastSuccessRes.output?.text ||
+          lastSuccessRes.response ||
+          (executedTools.length > 0
+            ? `Synthesized document findings and executed ${executedTools.length} action(s) on exploration canvas '${targetExploration}'.`
+            : `Synthesis completed by ${targetNode.title}.`);
+      }
+
+      targetNode.outputData = {
+        ...(lastSuccessRes?.output || {}),
+        synthesis: finalSynthesis,
+        agent_synthesis: finalSynthesis,
+        executedTools,
+      };
+      currentPayload = { ...currentPayload, ...targetNode.outputData };
     } else if (targetNode.type === 'output') {
       await new Promise((r) => setTimeout(r, 140));
       targetNode.status = 'completed';

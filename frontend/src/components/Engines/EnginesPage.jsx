@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import EngineCodeEditor from './EngineCodeEditor';
+// The one engine server: the download is the project's real agent/server.py, not a separate copy.
+import SERVER_PY_SOURCE from '../../../../agent/server.py?raw';
 import './EnginesPage.css';
 
 const MANIFEST_SPEC_GUIDE = `# Manifest specification:
@@ -183,7 +185,7 @@ ${MANIFEST_SPEC_GUIDE}
 MANIFEST = {
     "name": "file_detection",
     "version": "2.0.0",
-    "description": "Enterprise-grade binary & structural inspector: detects file type, corruption, extension spoofing, executable risk, and extraction routing.",
+    "description": "Binary & structural inspector: detects file type, corruption, extension spoofing, and extraction routing.",
     "inputs": {
         "file": {
             "type": "file",
@@ -208,7 +210,7 @@ import struct
 import mimetypes
 import zipfile
 
-MAX_FILE_SIZE_MB = 50.0
+MAX_FILE_SIZE_MB = 20.0
 
 # Canonical magic signatures: (signature, format, category, offset)
 MAGIC_SIGNATURES = [
@@ -609,9 +611,8 @@ def run(input_data, context=None):
     # Final Resolution
     detected_format = real_format or claimed_format or 'unknown'
     detected_category = real_category or ('document' if detected_format in ('pdf', 'doc', 'docx', 'txt', 'rtf')
-                                          else 'image' if detected_format in ('png', 'jpg', 'jpeg', 'webp', 'gif', 'svg')
+                                          else 'image' if detected_format in ('png', 'jpg', 'jpeg', 'webp', 'bmp', 'svg')
                                           else 'audio' if detected_format in ('mp3', 'wav', 'flac', 'ogg', 'm4a')
-                                          else 'video' if detected_format in ('mp4', 'webm', 'mov', 'avi')
                                           else 'tabular' if detected_format in ('csv', 'tsv', 'xlsx', 'xls')
                                           else 'code' if detected_format in ('json', 'xml', 'html', 'py', 'js')
                                           else 'archive' if detected_format in ('zip', 'tar', 'gz', '7z', 'rar')
@@ -619,13 +620,15 @@ def run(input_data, context=None):
 
     mime_guess, _ = mimetypes.guess_type(file_name)
     final_mime = declared_mime or mime_guess or f"application/{detected_format}"
-    is_supported = detected_category in ('document', 'image', 'tabular', 'audio', 'video', 'code', 'text')
+    is_blocked_media = detected_format == 'gif' or detected_category == 'video' or detected_format in ('mp4', 'webm', 'mov', 'avi', 'flv', 'mkv', 'gif')
+    is_supported = not is_blocked_media and detected_category in ('document', 'image', 'tabular', 'audio', 'code', 'text')
 
     return {
         "status": "verified" if is_supported else "unsupported",
         "valid": is_supported,
+        "reason": "Video and GIF files are not supported." if is_blocked_media else ("Unsupported format" if not is_supported else None),
         "file_name": file_name,
-        "category": detected_category,
+        "category": "unsupported" if is_blocked_media else detected_category,
         "format": detected_format,
         "claimed_format": claimed_format,
         "real_format": real_format or claimed_format,
@@ -680,7 +683,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 MAX_PAGES_LIMIT = 200
-MAX_FILE_SIZE_MB = 50.0
+MAX_FILE_SIZE_MB = 20.0
 EXECUTION_TIMEOUT_SECONDS = 30.0
 
 def _safe_clean_text(text):
@@ -1084,9 +1087,10 @@ def run(input_data, context=None) -> dict:
             "valid": False
         }
 
-    source_raw = input_data.get("source_node") or {}
-    target_raw = input_data.get("target_node") or {}
-    exploration_id = input_data.get("exploration_id") or "exploration_01"
+    pair = input_data.get("node_pair") if isinstance(input_data.get("node_pair"), dict) else input_data
+    source_raw = pair.get("source_node") or pair.get("sourceNode") or input_data.get("source_node") or input_data.get("sourceNode") or {}
+    target_raw = pair.get("target_node") or pair.get("targetNode") or input_data.get("target_node") or input_data.get("targetNode") or {}
+    exploration_id = pair.get("exploration_id") or input_data.get("exploration_id") or "exploration_01"
 
     source = extract_node_summary(source_raw)
     target = extract_node_summary(target_raw)
@@ -1485,152 +1489,6 @@ function renderModalityIcon(type, titlePrefix = '') {
   }
 }
 
-const SERVER_PY_TEMPLATE = `#!/usr/bin/env python3
-import sys
-import os
-import io
-import re
-import json
-import time
-import base64
-import struct
-import zipfile
-import mimetypes
-import traceback
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-HOST = "127.0.0.1"
-PORT = 8001
-
-
-class EngineRequestHandler(BaseHTTPRequestHandler):
-    def _set_cors_headers(self, status=200, content_type="application/json"):
-        self.send_response(status)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        self.send_header("Content-Type", content_type)
-        self.end_headers()
-
-    def do_OPTIONS(self):
-        self._set_cors_headers(200)
-
-    def do_GET(self):
-        if self.path in ["/health", "/api/health", "/"]:
-            self._set_cors_headers(200)
-            response = {
-                "status": "online",
-                "service": "trex-engine-runner",
-                "version": "1.0.0",
-                "python_version": sys.version.split()[0],
-                "host": f"{HOST}:{PORT}",
-            }
-            self.wfile.write(json.dumps(response).encode("utf-8"))
-        else:
-            self._set_cors_headers(404)
-            self.wfile.write(json.dumps({"error": "Endpoint not found"}).encode("utf-8"))
-
-    def do_POST(self):
-        if self.path == "/api/engines/run":
-            start_time = time.perf_counter()
-            try:
-                content_length = int(self.headers.get("Content-Length", 0))
-                body_bytes = self.rfile.read(content_length)
-
-                data = json.loads(body_bytes.decode("utf-8"))
-                code = data.get("code", "")
-                input_data = data.get("input_data", {})
-
-                if isinstance(input_data, dict):
-                    for k, v in list(input_data.items()):
-                        if isinstance(v, dict) and "file_bytes_b64" in v:
-                            try:
-                                v["header_bytes"] = base64.b64decode(v["file_bytes_b64"][:256])
-                            except Exception:
-                                pass
-                    if "file_bytes_b64" in input_data:
-                        try:
-                            input_data["header_bytes"] = base64.b64decode(input_data["file_bytes_b64"][:256])
-                        except Exception:
-                            pass
-
-                exec_scope = {
-                    "__name__": "__main__",
-                    "os": os,
-                    "sys": sys,
-                    "io": io,
-                    "re": re,
-                    "json": json,
-                    "base64": base64,
-                    "struct": struct,
-                    "zipfile": zipfile,
-                    "mimetypes": mimetypes,
-                }
-
-                exec(code, exec_scope)
-
-                if "run" not in exec_scope or not callable(exec_scope["run"]):
-                    raise ValueError("The engine script must define an entry function: def run(input_data, context=None)")
-
-                # Strict Contract Validation against MANIFEST if declared
-                manifest = exec_scope.get("MANIFEST")
-                if isinstance(manifest, dict) and "inputs" in manifest and isinstance(manifest["inputs"], dict):
-                    for port_name, port_spec in manifest["inputs"].items():
-                        if isinstance(port_spec, dict) and port_spec.get("required"):
-                            val = input_data.get(port_name) if isinstance(input_data, dict) else None
-                            # Backward compatible fallback for flat single file/media payloads
-                            if val is None and port_name in ["file", "document", "image", "audio", "video"] and isinstance(input_data, dict) and "file_name" in input_data:
-                                val = input_data
-                            if val is None or val == "":
-                                raise ValueError(f"Missing required input '{port_name}' ({port_spec.get('type', 'any')})")
-
-                output = exec_scope["run"](input_data)
-                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-
-                self._set_cors_headers(200)
-                res = {
-                    "status": "success",
-                    "output": output,
-                    "manifest": manifest if isinstance(manifest, dict) else None,
-                    "duration_ms": duration_ms,
-                    "server": "local-python",
-                }
-                self.wfile.write(json.dumps(res).encode("utf-8"))
-                print(f"[{time.strftime('%X')}] Executed engine ({duration_ms}ms)")
-
-            except Exception as e:
-                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-                err_trace = traceback.format_exc()
-                print(f"[{time.strftime('%X')}] Engine error: {str(e)}")
-                self._set_cors_headers(200)
-                res = {
-                    "status": "error",
-                    "error": str(e),
-                    "traceback": err_trace,
-                    "duration_ms": duration_ms,
-                }
-                self.wfile.write(json.dumps(res).encode("utf-8"))
-        else:
-            self._set_cors_headers(404)
-            self.wfile.write(json.dumps({"error": "Unknown POST route"}).encode("utf-8"))
-
-    def log_message(self, format, *args):
-        pass
-
-
-def run_server():
-    server_address = (HOST, PORT)
-    httpd = HTTPServer(server_address, EngineRequestHandler)
-    print(f"Trex Engine Server running on http://{HOST}:{PORT}")
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        httpd.server_close()
-
-
-if __name__ == "__main__":
-    run_server()
-`;
 
 export default function EnginesPage({
   engines = ['file_detection', 'document_extractor'],
@@ -1658,6 +1516,10 @@ export default function EnginesPage({
   const [showServerTooltip, setShowServerTooltip] = useState(false);
   const [copiedCmd, setCopiedCmd] = useState(false);
   const [downloadedServer, setDownloadedServer] = useState(false);
+  const [showServerSetupModal, setShowServerSetupModal] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [baseUrlInput, setBaseUrlInput] = useState('https://api.meta.ai/v1');
+  const [copiedRunCmd, setCopiedRunCmd] = useState(false);
 
   // Statically inspect the current Python code
   const inspection = useMemo(() => inspectPythonEngine(editorCode), [editorCode]);
@@ -1737,23 +1599,55 @@ export default function EnginesPage({
     }
   };
 
+  const handleGenerateServer = (e) => {
+    if (e) e.preventDefault();
+    try {
+      let rawKey = apiKeyInput.trim();
+      if (rawKey.includes('MODEL_API_KEY=')) {
+        const match = rawKey.match(/MODEL_API_KEY=([^\r\n]+)/);
+        if (match) rawKey = match[1].trim();
+      } else if (rawKey.includes('=')) {
+        rawKey = rawKey.split('=').pop().trim();
+      }
+
+      const rawBaseUrl = baseUrlInput.trim() || 'https://api.meta.ai/v1';
+
+      let customizedSource = SERVER_PY_SOURCE;
+      if (rawKey) {
+        customizedSource = customizedSource.replace(
+          'DEFAULT_API_KEY = ""',
+          `DEFAULT_API_KEY = ${JSON.stringify(rawKey)}`
+        );
+      }
+      if (rawBaseUrl && rawBaseUrl !== 'https://api.meta.ai/v1') {
+        customizedSource = customizedSource.replace(
+          'DEFAULT_BASE_URL = "https://api.meta.ai/v1"',
+          `DEFAULT_BASE_URL = ${JSON.stringify(rawBaseUrl)}`
+        );
+      }
+
+      // Download single merged standalone server.py
+      const sBlob = new Blob([customizedSource], { type: 'text/x-python;charset=utf-8' });
+      const sUrl = URL.createObjectURL(sBlob);
+      const sLink = document.createElement('a');
+      sLink.href = sUrl;
+      sLink.download = 'server.py';
+      document.body.appendChild(sLink);
+      sLink.click();
+      document.body.removeChild(sLink);
+      URL.revokeObjectURL(sUrl);
+
+      setDownloadedServer(true);
+      setTimeout(() => setDownloadedServer(false), 3000);
+    } catch (err) {
+      console.error('Failed to generate server.py:', err);
+    }
+  };
+
   const handleDownloadServer = (e) => {
     e.stopPropagation();
-    try {
-      const blob = new Blob([SERVER_PY_TEMPLATE], { type: 'text/x-python;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'server.py';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      setDownloadedServer(true);
-      setTimeout(() => setDownloadedServer(false), 2500);
-    } catch (err) {
-      console.error('Failed to download server.py:', err);
-    }
+    setShowServerTooltip(false);
+    setShowServerSetupModal(true);
   };
 
   // Check Python engine server health
@@ -1932,7 +1826,7 @@ export default function EnginesPage({
 
         {/* Right side: Delete button + Server status pill */}
         <div className="engines-top-right">
-          {!['file_detection', 'document_extractor', 'node_context_builder'].includes(activeEngineId) && onDeleteEngine && (
+          {!['resource_bridge', 'file_detection', 'document_extractor', 'node_context_builder'].includes(activeEngineId) && onDeleteEngine && (
             <button
               type="button"
               className="engine-top-delete-btn"
@@ -1950,7 +1844,8 @@ export default function EnginesPage({
           >
             <div
               className={`engine-server-pill ${serverStatus}`}
-              onClick={() => setShowServerTooltip((prev) => !prev)}
+              onClick={() => setShowServerSetupModal(true)}
+              title="Configure local Python server and environment (.env)"
             >
               <span className={`status-dot ${serverStatus === 'online' ? 'online' : 'offline'}`} />
               <span className="status-label">
@@ -1972,11 +1867,11 @@ export default function EnginesPage({
                 <div className="popover-section">
                   <div className="popover-step-row">
                     <span className="popover-step-index">1</span>
-                    <span className="popover-sub">Get standalone server file:</span>
+                    <span className="popover-sub">Get configured server and environment:</span>
                   </div>
                   <button
                     type="button"
-                    className={`popover-download-btn ${downloadedServer ? 'downloaded' : ''}`}
+                    className="popover-download-btn"
                     onClick={handleDownloadServer}
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1984,7 +1879,7 @@ export default function EnginesPage({
                       <polyline points="7 10 12 15 17 10" />
                       <line x1="12" y1="15" x2="12" y2="3" />
                     </svg>
-                    <span>{downloadedServer ? 'Downloaded server.py' : 'Download server.py'}</span>
+                    <span>Configure server & .env</span>
                   </button>
                 </div>
 
@@ -2283,6 +2178,113 @@ export default function EnginesPage({
                 Delete Engine
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Python Server & Environment Setup Modal */}
+      {showServerSetupModal && (
+        <div className="engine-modal-backdrop" onClick={() => setShowServerSetupModal(false)}>
+          <div className="engine-modal-card engine-server-setup-card" onClick={(e) => e.stopPropagation()}>
+            <div className="engine-server-setup-header">
+              <div className="engine-server-setup-title-row">
+                <h4 className="engine-modal-title">Python Server & Environment Setup</h4>
+                <button
+                  type="button"
+                  className="engine-server-setup-close"
+                  onClick={() => setShowServerSetupModal(false)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+              <p className="engine-modal-desc">
+                Paste your Meta API key to download a self-contained server.py file.
+              </p>
+            </div>
+
+            <div className="engine-server-live-status">
+              <span className={`status-dot ${serverStatus === 'online' ? 'online' : 'offline'}`} />
+              <span className="engine-server-status-text">
+                {serverStatus === 'online'
+                  ? 'Server is running on http://127.0.0.1:8001'
+                  : 'Server is offline (127.0.0.1:8001)'}
+              </span>
+            </div>
+
+            <form onSubmit={handleGenerateServer} className="engine-server-setup-form">
+              <div className="engine-server-field-group">
+                <label htmlFor="server-api-key-input" className="engine-server-label">
+                  Meta API Key
+                </label>
+                <input
+                  id="server-api-key-input"
+                  type="text"
+                  className="engine-server-key-input"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="Paste your key (e.g. LLM_...)"
+                  autoFocus
+                  spellCheck={false}
+                />
+              </div>
+
+              <div className="engine-server-field-group">
+                <label htmlFor="server-base-url-input" className="engine-server-label">
+                  Base URL
+                </label>
+                <input
+                  id="server-base-url-input"
+                  type="text"
+                  className="engine-server-readonly-input"
+                  value={baseUrlInput}
+                  onChange={(e) => setBaseUrlInput(e.target.value)}
+                  placeholder="https://api.meta.ai/v1"
+                />
+              </div>
+
+              <div className="engine-server-run-instructions">
+                <span className="engine-server-inst-label">Terminal command to run:</span>
+                <div className="engine-server-cmd-box">
+                  <code>python3 server.py</code>
+                  <button
+                    type="button"
+                    className="engine-server-copy-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigator.clipboard.writeText('python3 server.py');
+                      setCopiedRunCmd(true);
+                      setTimeout(() => setCopiedRunCmd(false), 2000);
+                    }}
+                  >
+                    {copiedRunCmd ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="engine-modal-actions">
+                <button
+                  type="button"
+                  className="engine-modal-btn-cancel"
+                  onClick={() => setShowServerSetupModal(false)}
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  className={`engine-server-btn-download ${downloadedServer ? 'downloaded' : ''}`}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  <span>{downloadedServer ? 'Downloaded server.py' : 'Download server.py'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

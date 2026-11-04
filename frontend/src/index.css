@@ -82,4 +82,38 @@ button, input {
   }
 }
 
+/* One-line minimalist loading bar at top of workflow canvas (no text, zero clutter) */
+.workflow-top-loading-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2.5px;
+  background: rgba(59, 130, 246, 0.15);
+  overflow: hidden;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.workflow-top-loading-line::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #3b82f6, #60a5fa, transparent);
+  box-shadow: 0 0 8px #3b82f6;
+  animation: wfTopLineGlide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes wfTopLineGlide {
+  0% { left: -40%; width: 30%; }
+  50% { width: 50%; }
+  100% { left: 100%; width: 30%; }
+}
+
+
+
+
 

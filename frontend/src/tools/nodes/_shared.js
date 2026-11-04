@@ -35,21 +35,21 @@ export function getNodeDefaultDimensions(type, isDoc) {
     return { width: 275, height: 68 };
   }
   if (type === 'topic') {
-    return { width: 190, height: 44 };
+    return { width: 190, height: 34 };
   }
   if (type === 'subtopic') {
-    return { width: 150, height: 36 };
+    return { width: 150, height: 28 };
   }
   if (type === 'evidence') {
-    return { width: 170, height: 40 };
+    return { width: 170, height: 30 };
   }
   if (type === 'claim') {
-    return { width: 185, height: 42 };
+    return { width: 185, height: 32 };
   }
   if (type === 'hypothesis' || type === 'finding') {
-    return { width: 185, height: 42 };
+    return { width: 185, height: 32 };
   }
-  return { width: 185, height: 42 };
+  return { width: 185, height: 32 };
 }
 
 export function resolveNodeId(updatedNodes, idOrQuery) {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './DocumentModal.css';
 
-export default function DocumentModal({ node, isOpen, onClose, onRename }) {
+export default function DocumentModal({ node, isOpen, onClose, onRename, onDelete }) {
   const [isEditing, setIsEditing] = useState(false);
   const [baseName, setBaseName] = useState('');
   const [extension, setExtension] = useState('');
@@ -100,48 +100,61 @@ export default function DocumentModal({ node, isOpen, onClose, onRename }) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const getCategoryLabel = () => {
+    if (isResource) return 'Resource';
+    const raw = (node?.type || node?.category || 'finding').replace(/_/g, ' ');
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  };
+
   return (
     <div className="doc-modal-backdrop">
       <div className="doc-modal-box" ref={modalBoxRef}>
         <div className="doc-modal-header">
-          {isEditing ? (
-            <div className="title-edit-wrap">
-              <input
-                ref={inputRef}
-                type="text"
-                className="title-edit-input"
-                value={baseName}
-                onChange={(e) => setBaseName(e.target.value)}
-                onBlur={handleSaveName}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveName();
-                  if (e.key === 'Escape') setIsEditing(false);
-                }}
-              />
-              {extension && <span className="title-ext-locked">{extension}</span>}
-            </div>
-          ) : (
-            <div
-              className="doc-modal-title-view"
-              onClick={() => setIsEditing(true)}
-              title="Click to edit name"
-            >
-              <span className="doc-title-base">{baseName || 'Document'}</span>
-              {extension && <span className="doc-title-ext">{extension}</span>}
-              <svg
-                className="doc-title-edit-hint"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+          <div className="doc-header-col">
+            {isEditing ? (
+              <div className="title-edit-wrap">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  className="title-edit-input"
+                  value={baseName}
+                  onChange={(e) => setBaseName(e.target.value)}
+                  onBlur={handleSaveName}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveName();
+                    if (e.key === 'Escape') setIsEditing(false);
+                  }}
+                />
+                {extension && <span className="title-ext-locked">{extension}</span>}
+              </div>
+            ) : (
+              <div
+                className="doc-modal-title-view"
+                onClick={() => setIsEditing(true)}
+                title="Click to edit name"
               >
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-            </div>
-          )}
+                <span className="doc-title-base">{baseName || node?.title || node?.name || 'Node'}</span>
+                {extension && <span className="doc-title-ext">{extension}</span>}
+                <svg
+                  className="doc-title-edit-hint"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </div>
+            )}
+            {(node.id || node.node_id) && (
+              <span className="doc-node-id-sub">
+                {node.id || node.node_id}
+              </span>
+            )}
+          </div>
 
           <button
             type="button"
@@ -155,16 +168,9 @@ export default function DocumentModal({ node, isOpen, onClose, onRename }) {
 
         <div className="doc-modal-body">
           <div className="doc-info-row">
-            <span className="doc-info-label">Node ID</span>
-            <span className="doc-info-val" style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: '11px', color: '#64748b' }}>
-              {node.id || node.node_id}
-            </span>
-          </div>
-
-          <div className="doc-info-row">
             <span className="doc-info-label">Category</span>
             <span className="doc-info-val">
-              {isResource ? 'Resource (Document)' : `Investigation (${(node.type || 'finding').replace('_', ' ')})`}
+              {getCategoryLabel()}
             </span>
           </div>
 
@@ -192,6 +198,15 @@ export default function DocumentModal({ node, isOpen, onClose, onRename }) {
         </div>
 
         <div className="doc-modal-actions">
+          {onDelete && (
+            <button
+              type="button"
+              className="doc-btn-delete"
+              onClick={() => onDelete(node)}
+            >
+              Delete
+            </button>
+          )}
           <button type="button" className="btn-secondary" onClick={onClose}>
             Close
           </button>
