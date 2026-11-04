@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Trex Up — Simulation Canvas</title>
+  <title>Trex Up</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -15,7 +16,8 @@
       user-select: none;
     }
 
-    body, html {
+    body,
+    html {
       width: 100%;
       height: 100%;
       overflow: hidden;
@@ -62,9 +64,17 @@
     }
 
     @keyframes drift {
-      0% { transform: translate(0, 0) scale(1); }
-      50% { transform: translate(60px, 40px) scale(1.08); }
-      100% { transform: translate(-40px, 70px) scale(0.95); }
+      0% {
+        transform: translate(0, 0) scale(1);
+      }
+
+      50% {
+        transform: translate(60px, 40px) scale(1.08);
+      }
+
+      100% {
+        transform: translate(-40px, 70px) scale(0.95);
+      }
     }
 
     /* Simulation Canvas */
@@ -99,7 +109,7 @@
       -webkit-backdrop-filter: blur(28px) saturate(160%);
       border-radius: 24px;
       border: 1px solid rgba(255, 255, 255, 0.08);
-      box-shadow: 
+      box-shadow:
         0 20px 50px rgba(0, 0, 0, 0.4),
         0 0 0 1px rgba(255, 255, 255, 0.04),
         inset 0 1px 1px rgba(255, 255, 255, 0.15),
@@ -116,7 +126,7 @@
     }
 
     .floating-block:hover {
-      box-shadow: 
+      box-shadow:
         0 30px 65px rgba(0, 0, 0, 0.5),
         0 0 40px rgba(99, 102, 241, 0.15),
         inset 0 1px 2px rgba(255, 255, 255, 0.25);
@@ -141,9 +151,12 @@
 
     /* Floating Keyframe */
     @keyframes float {
-      0%, 100% {
+
+      0%,
+      100% {
         transform: translateY(0px) rotate(0deg);
       }
+
       50% {
         transform: translateY(-16px) rotate(0.4deg);
       }
@@ -166,8 +179,17 @@
     }
 
     @keyframes pulse {
-      0%, 100% { opacity: 0.8; transform: scale(1); }
-      50% { opacity: 0.35; transform: scale(0.9); }
+
+      0%,
+      100% {
+        opacity: 0.8;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: 0.35;
+        transform: scale(0.9);
+      }
     }
 
     .brand-mark {
@@ -225,6 +247,7 @@
     }
   </style>
 </head>
+
 <body>
 
   <!-- Soft Ambient Glow Orbs -->
@@ -242,7 +265,7 @@
         <span class="brand-mark">Trex Up</span>
         <div class="status-dot"></div>
       </div>
-      
+
       <div class="block-core">
         <div class="block-title">Simulation Node</div>
         <div class="block-desc">Continuous state observer and coordinate matrix.</div>
@@ -373,10 +396,10 @@
       const rect = block.getBoundingClientRect();
       const blockCenterX = rect.left + rect.width / 2;
       const blockCenterY = rect.top + rect.height / 2;
-      
+
       const deltaX = (e.clientX - blockCenterX) / (width / 2);
       const deltaY = (e.clientY - blockCenterY) / (height / 2);
-      
+
       const tiltX = -deltaY * 8;
       const tiltY = deltaX * 8;
 
@@ -387,4 +410,5 @@
     animate();
   </script>
 </body>
+
 </html>
