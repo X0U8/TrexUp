@@ -18,6 +18,8 @@ import * as connect_nodes from './connect_nodes';
 import * as get_connections from './get_connections';
 import * as update_connection from './update_connection';
 import * as remove_connection from './remove_connection';
+import * as web_search from './web_search';
+import * as download_web_file from './download_web_file';
 
 export {
   NODE_TYPES,
@@ -44,6 +46,8 @@ export const MODULES = Object.fromEntries(
     get_connections,
     update_connection,
     remove_connection,
+    web_search,
+    download_web_file,
   ].map((m) => [m.DEFINITION.name, m])
 );
 
@@ -65,6 +69,8 @@ export const NODE_TOOL_DEFINITIONS = [
   get_connections.DEFINITION,
   update_connection.DEFINITION,
   remove_connection.DEFINITION,
+  web_search.DEFINITION,
+  download_web_file.DEFINITION,
 ];
 
 // Backwards-compatibility alias
@@ -77,14 +83,14 @@ export function definitions() {
 /**
  * Standard registry runner matching meta_project pattern
  */
-export function runNodeTool(ctx, name, args) {
+export async function runNodeTool(ctx, name, args) {
   const tool = MODULES[name];
   if (!tool) return { error: `unknown tool: ${JSON.stringify(name)}` };
   if (args === null || typeof args !== 'object' || Array.isArray(args)) {
     return { error: 'tool arguments must be a JSON object' };
   }
   try {
-    const result = tool.run(ctx, args);
+    const result = await tool.run(ctx, args);
     return result && typeof result === 'object' ? result : { result };
   } catch (error) {
     return { error: error?.message || 'tool execution failed' };
@@ -94,10 +100,11 @@ export function runNodeTool(ctx, name, args) {
 /**
  * Legacy compatibility runner matching (explorationsData, activeExpId, toolName, args)
  */
-export function executeNodeTool(explorationsData, activeExpId, toolName, args) {
+export async function executeNodeTool(explorationsData, activeExpId, toolName, args) {
   const ctx = {
     explorationsData: explorationsData || {},
     activeExpId,
   };
-  return runNodeTool(ctx, toolName, args);
+  return await runNodeTool(ctx, toolName, args);
 }
+

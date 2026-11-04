@@ -908,7 +908,7 @@ def _extract_pdf(raw_bytes, start_time):
 
 def run(input_data, context=None):
     start_time = time.perf_counter()
-    doc_info = input_data.get('document') if isinstance(input_data, dict) and 'document' in input_data else input_data
+    doc_info = input_data.get('document') if isinstance(input_data, dict) and isinstance(input_data.get('document'), dict) else input_data
     if not isinstance(doc_info, dict):
         return {
             "status": "failed",
@@ -917,7 +917,14 @@ def run(input_data, context=None):
             "is_recoverable": False,
             "confidence": 0.0
         }
-    file_name = doc_info.get('file_name') or doc_info.get('name') or input_data.get('file_name') or input_data.get('name') or 'unnamed_doc'
+    file_name = (
+        doc_info.get('file_name')
+        or doc_info.get('name')
+        or input_data.get('file_name')
+        or input_data.get('name')
+        or (input_data.get('document') if isinstance(input_data.get('document'), str) else 'unnamed_doc')
+        or 'unnamed_doc'
+    )
     ext = os.path.splitext(file_name)[1].lower().lstrip('.')
     size_bytes = doc_info.get('size_bytes') or doc_info.get('size') or input_data.get('size_bytes') or input_data.get('size') or 0
     b64_data = doc_info.get('file_bytes_b64') or doc_info.get('b64') or input_data.get('file_bytes_b64') or input_data.get('b64') or ''

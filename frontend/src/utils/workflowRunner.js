@@ -167,6 +167,19 @@ function sanitizeContextForPrompt(obj, depth = 0) {
 // Read-only tools never change the canvas, so a repeat call with nothing changed since is skipped.
 const READ_ONLY_TOOLS = ['canvas_outline', 'search_nodes', 'list_explorations', 'get_node', 'get_connections'];
 
+/** The tool list with the named tools removed (handles both flat tools and namespaces). */
+function withoutTools(tools, names) {
+  if (!Array.isArray(tools) || names.size === 0) return tools;
+  return tools
+    .map((t) => {
+      if (t?.type === 'namespace') {
+        return { ...t, tools: (t.tools || []).filter((f) => !names.has(f.name)) };
+      }
+      return names.has(t?.function?.name || t?.name) ? null : t;
+    })
+    .filter((t) => t && (t.type !== 'namespace' || (t.tools || []).length > 0));
+}
+
 function summarizeToolAction(toolName, args, result) {
   if (result?.already_read) return `${toolName}: skipped, already read this run and nothing changed since (see the earlier result)`;
   if (!result || result.error) return `${toolName}: FAILED - ${result?.error || 'no result'}`;
@@ -261,7 +274,7 @@ async function executeImageModel({ agentPrompt, inputPayload }) {
   }
 }
 
-async function executeAgentModel({ modelId, systemPrompt, agentPrompt, temperature, reasoningEffort, inputPayload, targetTitle, tools, progress }) {
+async function executeAgentModel({ modelId, systemPrompt, agentPrompt, temperature, reasoningEffort, inputPayload, targetTitle, tools, progress, canvasState, isLastTurn }) {
   if (modelId === 'muse-image-1.0') {
     return executeImageModel({ agentPrompt, inputPayload });
   }
@@ -348,6 +361,15 @@ async function executeAgentModel({ modelId, systemPrompt, agentPrompt, temperatu
         if (Object.keys(sanitizedContext).length > 0) {
           promptParts.push(`Context Data:\n${JSON.stringify(sanitizedContext, null, 2)}`);
         }
+      }
+
+      if (isLastTurn) {
+        promptParts.push('This is your final turn. Create the missing nodes now with create_nodes, or, if the canvas already has everything, reply with your summary and call no tools.');
+      }
+
+      // The canvas as it was at the start of the run (read by the runner, not by the model).
+      if (canvasState) {
+        promptParts.push(`Current canvas (already read for you; do not re-query it before creating):\n${canvasState}`);
       }
 
       // Earlier turns of this same run: what the model said and did, so it does not start over.
@@ -540,10 +562,19 @@ export async function executeWorkflow({
   workflowId,
   workflowData,
   project,
-  triggerPayload,
+  triggerPayload: rawTriggerPayload,
   onProgress,
   onExecuteTool,
 }) {
+  const triggerPayload = {
+    triggerType: 'manual',
+    triggerLabel: `manual: ${workflowId || 'workflow'}`,
+    ...(rawTriggerPayload || {}),
+  };
+  if (!triggerPayload.triggerLabel) {
+    triggerPayload.triggerLabel = `${triggerPayload.triggerType || 'manual'}: ${workflowId || 'workflow'}`;
+  }
+
   const wfNodes = workflowData?.nodes || {};
   const wfThreads = Array.isArray(workflowData?.threads)
     ? workflowData.threads
@@ -688,6 +719,13 @@ export async function executeWorkflow({
   if (triggerPayload.triggerType === 'manual') {
     const n = triggerPayload.node || {};
     initialPayload.node_text = [n.title, n.description].filter(Boolean).join('\n');
+  }
+
+  const customText = triggerPayload.text || triggerPayload.source_text || triggerPayload.extracted_text || triggerPayload.prompt || '';
+  if (customText) {
+    initialPayload.text = customText;
+    initialPayload.extracted_text = customText;
+    initialPayload.node_text = customText;
   }
 
   let currentPayload = { ...initialPayload };
@@ -914,9 +952,10 @@ export async function executeWorkflow({
         // HTTP 200: Engine completed successfully
         targetNode.status = 'completed';
         thread.status = 'completed';
+        const engineText = activeNodeInput.extracted_text || activeNodeInput.text || '';
         targetNode.inputData = {
           document: activeNodeInput.file_name || activeNodeInput.document_name,
-          source_text: activeNodeInput.extracted_text || activeNodeInput.text || '',
+          ...(engineText.trim() ? { source_text: engineText } : {}),
           category: activeNodeInput.category,
           size_bytes: activeNodeInput.size_bytes,
           input_source: sourceScope,
@@ -1062,8 +1101,20 @@ export async function executeWorkflow({
       let turnInputPayload = { ...agentPayload };
       const progressLog = [];
       const readsSinceChange = new Set(); // read-only calls made since the last canvas change
+      const retiredTools = new Set(); // read-only tools already answered in this run: removed from the agent's tools
       const MAX_AGENT_TURNS = 4;
       let lastSuccessRes = null;
+
+      // Read the canvas once here, so the agent starts with it in its context and spends no turn reading it.
+      let canvasSnapshot = '';
+      if (isToolAccessEnabled && effectiveAgentTools && onExecuteTool) {
+        const snap = await onExecuteTool('canvas_outline', { exploration_id: targetExploration });
+        if (snap?.outline) {
+          const counts = Object.entries(snap.counts || {}).map(([k, v]) => `${v} ${k}`).join(', ') || 'none';
+          canvasSnapshot = `Counts: ${counts}\n${snap.outline}`;
+        }
+        retiredTools.add('canvas_outline');
+      }
 
       for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
         const res = await executeAgentModel({
@@ -1074,8 +1125,10 @@ export async function executeWorkflow({
           reasoningEffort: targetNode.reasoningEffort,
           inputPayload: turnInputPayload,
           targetTitle: targetNode.title,
-          tools: effectiveAgentTools,
+          tools: withoutTools(effectiveAgentTools, retiredTools),
           progress: progressLog,
+          canvasState: canvasSnapshot,
+          isLastTurn: turn === MAX_AGENT_TURNS - 1,
         });
 
         if (res.status !== 'success') {
@@ -1136,12 +1189,14 @@ export async function executeWorkflow({
           let toolResult;
           if (READ_ONLY_TOOLS.includes(tc.name) && readsSinceChange.has(readKey)) {
             toolResult = { success: true, already_read: true };
+            retiredTools.add(tc.name);
           } else {
             toolResult = await onExecuteTool?.(tc.name, parsedArgs);
             if (READ_ONLY_TOOLS.includes(tc.name)) {
               readsSinceChange.add(readKey);
             } else if (toolResult && !toolResult.error) {
               readsSinceChange.clear();
+              retiredTools.clear(); // the canvas changed: reads are useful again (one confirmation check)
             }
           }
           if (tc.name === 'create_node' && toolResult?.node?.id) {
@@ -1225,7 +1280,7 @@ export async function executeWorkflow({
       thread.status = 'completed';
       targetNode.inputData = {
         document: activeNodeInput.document_name || activeNodeInput.file_name || activeNodeInput.file?.name,
-        source_text: incomingText,
+        ...(typeof incomingText === 'string' && incomingText.trim() ? { source_text: incomingText } : {}),
         category: activeNodeInput.category,
         input_source: sourceScope,
       };

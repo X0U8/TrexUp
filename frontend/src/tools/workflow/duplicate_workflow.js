@@ -3,7 +3,7 @@ import { resolveWorkflow, generateNextWorkflowId } from './_shared';
 export const DEFINITION = {
   type: 'function',
   name: 'duplicate_workflow',
-  description: 'Clone an existing workflow pipeline to experiment with modifications safely.',
+  description: 'Clone an existing workflow pipeline to test modifications safely.',
   parameters: {
     type: 'object',
     properties: {

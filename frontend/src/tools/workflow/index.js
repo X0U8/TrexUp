@@ -35,6 +35,8 @@ import * as validate_workflow from './validate_workflow';
 import * as execute_workflow from './execute_workflow';
 import * as get_workflow_run_state from './get_workflow_run_state';
 import * as inspect_node_io from './inspect_node_io';
+import * as get_workflow_logs from './get_workflow_logs';
+import * as inspect_workflow_run_log from './inspect_workflow_run_log';
 
 export { WORKFLOW_INSTRUCTIONS } from './workflowInstructions';
 
@@ -69,6 +71,8 @@ export const MODULES = Object.fromEntries(
     execute_workflow,
     get_workflow_run_state,
     inspect_node_io,
+    get_workflow_logs,
+    inspect_workflow_run_log,
   ].map((m) => [m.DEFINITION.name, m])
 );
 
@@ -92,6 +96,9 @@ export async function runWorkflowTool(ctx, name, args) {
     engines: ctx?.engines || [],
     enginesData: ctx?.enginesData || {},
     isWorkflowRunning: ctx?.isWorkflowRunning || false,
+    workflowLogs: ctx?.workflowLogs || [],
+    onWorkflowProgress: ctx?.onWorkflowProgress,
+    onExecuteTool: ctx?.onExecuteTool,
   };
 
   try {

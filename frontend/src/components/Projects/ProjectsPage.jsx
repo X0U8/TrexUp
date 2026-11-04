@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import './ProjectsPage.css';
 import NewProjectModal from './NewProjectModal';
-import { getProjectsMetadata, updateProjectMeta } from '../../utils/db';
+import { getProjectsMetadata, updateProjectMeta, deleteProject } from '../../utils/db';
 
 function formatCreationDate(dateString) {
   if (!dateString) return 'Created recently';
@@ -40,6 +40,9 @@ export default function ProjectsPage({ onSelectProject }) {
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchActive, setIsSearchActive] = useState(false);
+  const [activeMenuProjectId, setActiveMenuProjectId] = useState(null);
+  const [projectToDelete, setProjectToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const loadProjects = async () => {
     try {
@@ -53,6 +56,16 @@ export default function ProjectsPage({ onSelectProject }) {
 
   useEffect(() => {
     loadProjects();
+  }, []);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (!e.target.closest('.project-menu-wrap')) {
+        setActiveMenuProjectId(null);
+      }
+    };
+    window.addEventListener('click', handleOutsideClick);
+    return () => window.removeEventListener('click', handleOutsideClick);
   }, []);
 
   const handleCreated = (newProject) => {
@@ -72,7 +85,7 @@ export default function ProjectsPage({ onSelectProject }) {
   };
 
   const handleTogglePin = async (e, project) => {
-    e.stopPropagation();
+    e?.stopPropagation();
     const nextPinned = !project.pinned;
     try {
       await updateProjectMeta(project.id, { pinned: nextPinned });
@@ -81,6 +94,20 @@ export default function ProjectsPage({ onSelectProject }) {
       );
     } catch (err) {
       console.error('Failed to toggle pin:', err);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!projectToDelete || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await deleteProject(projectToDelete.id);
+      setProjects((prev) => prev.filter((p) => p.id !== projectToDelete.id));
+      setProjectToDelete(null);
+    } catch (err) {
+      console.error('Failed to delete project:', err);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -136,8 +163,6 @@ export default function ProjectsPage({ onSelectProject }) {
             </button>
           )}
 
-
-
           {/* New Project Header Button */}
           <button
             type="button"
@@ -160,7 +185,7 @@ export default function ProjectsPage({ onSelectProject }) {
                 onClick={() => handleSelectCard(p)}
                 title={p.name}
               >
-                {/* Left Project Icon Container (matching reference image) */}
+                {/* Left Project Icon Container */}
                 <div className="project-card-icon-box" aria-hidden="true">
                   {loadingProjectId === p.id ? (
                     <div className="project-card-spinner" />
@@ -188,25 +213,88 @@ export default function ProjectsPage({ onSelectProject }) {
                   </span>
                 </div>
 
-                {/* Right Pin Icon */}
-                <button
-                  type="button"
-                  className={`project-pin-btn ${p.pinned ? 'pinned' : ''}`}
-                  onClick={(e) => handleTogglePin(e, p)}
-                  title={p.pinned ? 'Unpin project' : 'Pin project'}
-                  aria-label="Pin"
-                >
-                  <svg viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
-                  </svg>
-                </button>
+                {/* Right Pin & Three-Dot Menu Actions */}
+                <div className="project-card-actions" onClick={(e) => e.stopPropagation()}>
+                  {p.pinned && (
+                    <div className="project-card-pin-indicator" title="Pinned project">
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                      </svg>
+                    </div>
+                  )}
+
+                  <div className="project-menu-wrap">
+                    <button
+                      type="button"
+                      className={`project-menu-btn ${activeMenuProjectId === p.id ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenuProjectId((prev) => (prev === p.id ? null : p.id));
+                      }}
+                      title="Project options"
+                      aria-label="Options"
+                    >
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <circle cx="12" cy="12" r="1.75" />
+                        <circle cx="6" cy="12" r="1.75" />
+                        <circle cx="18" cy="12" r="1.75" />
+                      </svg>
+                    </button>
+
+                    {activeMenuProjectId === p.id && (
+                      <div className="project-dropdown-menu" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="project-dropdown-item"
+                          onClick={(e) => {
+                            handleTogglePin(e, p);
+                            setActiveMenuProjectId(null);
+                          }}
+                        >
+                          <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 14, height: 14 }}>
+                            <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                          </svg>
+                          <span>{p.pinned ? 'Unpin project' : 'Pin project'}</span>
+                        </button>
+
+                        <div className="project-dropdown-divider" />
+
+                        <button
+                          type="button"
+                          className="project-dropdown-item danger"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuProjectId(null);
+                            setProjectToDelete(p);
+                          }}
+                        >
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            style={{ width: 14, height: 14 }}
+                          >
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                          </svg>
+                          <span>Delete project</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             ))}
           </div>
         </main>
       ) : (
         <main className="projects-center">
-          {/* Line-art Illustration (Blocks with Hand matching reference exactly) */}
+          {/* Line-art Illustration */}
           <div className="empty-state-icon" aria-hidden="true">
             <svg
               viewBox="0 0 100 100"
@@ -216,32 +304,14 @@ export default function ProjectsPage({ onSelectProject }) {
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              {/* 3 resting tiles */}
               <rect x="28" y="16" width="18" height="18" rx="3.5" />
               <rect x="50" y="16" width="18" height="18" rx="3.5" />
               <rect x="28" y="40" width="18" height="18" rx="3.5" />
-
-              {/* Tile being grabbed */}
               <rect x="54" y="37" width="18" height="18" rx="3.5" />
-
-              {/* Hand: one closed outline (thumb, four fingers, palm).
-      The fill hides the tile behind the fingers, so set --icon-bg to your background color. */}
               <path
-                style={{ fill: "var(--icon-bg, white)" }}
-                d="M 41.9 70.3
-       A 2.5 2.5 0 0 1 46.1 67.7
-       L 53 73.8
-       V 52.5 A 2.5 2.5 0 0 1 58 52.5
-       V 50.5 A 2.5 2.5 0 0 1 63 50.5
-       V 52.5 A 2.5 2.5 0 0 1 68 52.5
-       V 55.5 A 2.5 2.5 0 0 1 73 55.5
-       V 78
-       C 73 85 68 89 63 89
-       C 57 89 52 87 49.9 83.3
-       Z"
+                style={{ fill: 'var(--icon-bg, white)' }}
+                d="M 41.9 70.3 A 2.5 2.5 0 0 1 46.1 67.7 L 53 73.8 V 52.5 A 2.5 2.5 0 0 1 58 52.5 V 50.5 A 2.5 2.5 0 0 1 63 50.5 V 52.5 A 2.5 2.5 0 0 1 68 52.5 V 55.5 A 2.5 2.5 0 0 1 73 55.5 V 78 C 73 85 68 89 63 89 C 57 89 52 87 49.9 83.3 Z"
               />
-
-              {/* Finger separators */}
               <path d="M 58 52.5 V 68" />
               <path d="M 63 52.5 V 68" />
               <path d="M 68 55.5 V 68" />
@@ -250,7 +320,7 @@ export default function ProjectsPage({ onSelectProject }) {
 
           <h2 className="empty-state-heading">Looking to start a project?</h2>
           <p className="empty-state-desc">
-            Upload materials, run custom engines , workflows , experiments.
+            Upload materials, run custom engines and workflows.
           </p>
 
           <button
@@ -269,6 +339,49 @@ export default function ProjectsPage({ onSelectProject }) {
         onClose={() => setIsNewModalOpen(false)}
         onCreated={handleCreated}
       />
+
+      {/* Delete Confirmation Modal */}
+      {projectToDelete && (
+        <div className="project-delete-backdrop" onClick={() => !isDeleting && setProjectToDelete(null)}>
+          <div className="project-delete-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="project-delete-modal-header">
+              <div className="delete-icon-circle" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  <line x1="10" y1="11" x2="10" y2="17" />
+                  <line x1="14" y1="11" x2="14" y2="17" />
+                </svg>
+              </div>
+              <div className="delete-header-texts">
+                <h3 className="delete-modal-title">Delete Project</h3>
+                <p className="delete-modal-desc">
+                  Are you sure you want to delete <strong>"{projectToDelete.name}"</strong>? All explorations, workflows, engines, and logs within this project will be permanently removed. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="project-delete-modal-actions">
+              <button
+                type="button"
+                className="btn-modal-cancel"
+                onClick={() => setProjectToDelete(null)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-modal-delete"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

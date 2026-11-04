@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { NODE_LIFECYCLE_DEFINITIONS, NODE_INSTRUCTIONS } from '../../tools/nodeLifecycleTools';
 import { ENGINE_TOOL_DEFINITIONS, ENGINE_INSTRUCTIONS } from '../../tools/engine';
 import { WORKFLOW_TOOL_DEFINITIONS, WORKFLOW_INSTRUCTIONS } from '../../tools/workflowTools';
-import { EXPERIMENT_TOOL_DEFINITIONS, EXPERIMENT_INSTRUCTIONS } from '../../tools/experiment';
 import { getGlobalChat, saveGlobalChat, clearGlobalChat } from '../../utils/db';
+import { getEngineManifest } from '../../utils/engineUtils';
+import { AVAILABLE_AGENT_MODELS } from '../../tools/workflow/_shared';
 import MarkdownText from './MarkdownText';
 import './ModelChatPanel.css';
 
@@ -12,9 +13,10 @@ const FIXED_MODEL_NAME = 'Muse Spark 1.3';
 
 export default function ModelChatPanel({
   currentExploration = 'exploration_01',
-  currentExperiment = 'experiment_01',
-  experimentData = {},
   nodes = {},
+  engines = [],
+  enginesData = {},
+  workflows = {},
   onExecuteTool,
   focusedNode = null,
   onClearFocusedNode,
@@ -277,7 +279,6 @@ export default function ModelChatPanel({
         ...NODE_LIFECYCLE_DEFINITIONS,
         ...ENGINE_TOOL_DEFINITIONS,
         ...WORKFLOW_TOOL_DEFINITIONS,
-        ...EXPERIMENT_TOOL_DEFINITIONS,
       ].map((tool) => ({
         type: 'function',
         function: {
@@ -306,12 +307,48 @@ export default function ModelChatPanel({
           };
         });
 
-      const systemPrompt = `You are Trex Assistant, the autonomous scientific research & workspace investigation assistant.
-You operate globally across the entire project, all scientific explorations, workflows, and autonomous experiments.
+      // Construct clean, live map of current engines and workflows
+      const engineListMap = (engines || []).map((engId) => {
+        const manifest = getEngineManifest(engId, enginesData);
+        const inKeys = Object.keys(manifest.inputs || {}).join(', ') || 'none';
+        const outKeys = Object.keys(manifest.outputs || {}).join(', ') || 'output';
+        return `- ${manifest.name} (id: "${engId}"): ${manifest.description} | Inputs: [${inKeys}] | Outputs: [${outKeys}]`;
+      }).join('\n');
+
+      const workflowKeys = Object.keys(workflows || {});
+      const workflowListMap = workflowKeys.length > 0
+        ? workflowKeys.map((wfId) => {
+            const wf = workflows[wfId];
+            const nodeCount = Array.isArray(wf?.nodes) ? wf.nodes.length : 0;
+            return `- ${wf?.name || wfId} (id: "${wfId}"): ${wf?.description || 'Pipeline'} | ${nodeCount} stages`;
+          }).join('\n')
+        : '- No custom workflows registered yet in this project.';
+
+      const modelListMap = AVAILABLE_AGENT_MODELS.map((m) =>
+        `- ${m.name} (id: "${m.id}") [${m.tag}]: ${m.desc}`
+      ).join('\n');
+
+      const liveSystemMap = `
+### Live System Map (Current Workspace State)
+Available Agent Models (for Agent Nodes in Workflows):
+${modelListMap}
+
+Available Python Engines:
+${engineListMap || '- None'}
+
+Available Workflows:
+${workflowListMap}
+
+Storage Architecture:
+- Physical Documents / Binary Assets: OS disk storage at 'storage/documents/'
+- Project Graph & Execution Records: Stored directly in IndexedDB
+`;
+
+      const systemPrompt = `You are Trex Assistant, the intelligent research & workspace investigation assistant.
+You operate globally across the entire project, all scientific explorations, workflows, and engines.
 The active exploration canvas in focus is "${currentExploration}".
-The active experiment is "${currentExperiment}".
 When creating, searching, or mutating exploration nodes, provide exploration_id as "${currentExploration}" unless the user explicitly refers to another exploration.
-You can investigate across explorations, connect findings, formulate hypotheses, synthesize evidence, and plan and execute empirical experiments across the entire workspace.
+You can investigate across explorations, connect findings, synthesize evidence, and execute workflows across the entire workspace.
 You have full multimodal vision capabilities. Any image files or diagrams attached to focused canvas nodes or referenced in paths are automatically loaded and provided directly to you as vision inputs, so you can inspect, describe, and analyze them in detail.
 
 ${NODE_INSTRUCTIONS}
@@ -320,18 +357,13 @@ ${ENGINE_INSTRUCTIONS}
 
 ${WORKFLOW_INSTRUCTIONS}
 
-${EXPERIMENT_INSTRUCTIONS}`;
+${liveSystemMap}`;
 
       const activeNodeContext = focusedNode
         ? `\n\n[Active Focused Canvas Node: ID="${focusedNode.id || focusedNode.node_id}", Title="${(focusedNode.title || focusedNode.name || '').replace(/\.node$/i, '')}", Type="${focusedNode.type || focusedNode.category || 'node'}", Status="${focusedNode.status || ''}", Path="${focusedNode.local_path || focusedNode.filePath || focusedNode.path || focusedNode.url || focusedNode.cloudinaryUrl || ''}", Description="${focusedNode.description || focusedNode.summary || focusedNode.content || ''}"]`
         : '';
 
-      const activeExperimentContext = currentExperiment && experimentData?.title
-        ? `\n\n[Active Experiment: ID="${currentExperiment}", Title="${experimentData.title}", Status="${experimentData.status || 'active'}", Steps=${Array.isArray(experimentData.plan) ? experimentData.plan.length : 0}, Findings=${Array.isArray(experimentData.findings) ? experimentData.findings.length : 0}]`
-        : '';
-
-      const promptContext = `${activeNodeContext}${activeExperimentContext}`;
-      const userPromptWithContext = promptContext ? `${text}${promptContext}` : text;
+      const userPromptWithContext = activeNodeContext ? `${text}${activeNodeContext}` : text;
 
       let conversationMessages = [
         { role: 'system', content: systemPrompt },
@@ -343,11 +375,38 @@ ${EXPERIMENT_INSTRUCTIONS}`;
       let finalReply = '';
       let iteration = 0;
       let validationAttempts = 0;
-      const MAX_ITERATIONS = 8;
+      const MAX_ITERATIONS = 20;
 
       while (iteration < MAX_ITERATIONS) {
         iteration++;
         setActiveToolStatus(iteration === 1 ? 'Connecting to model...' : 'Applying tool results...');
+
+        const sanitizedMessages = conversationMessages.map((m) => {
+          const copy = { ...m };
+          if (copy.role === 'tool') {
+            copy.content = typeof copy.content === 'string' ? copy.content : JSON.stringify(copy.content || {});
+            return copy;
+          }
+          if (copy.role === 'assistant') {
+            if (copy.tool_calls && copy.tool_calls.length > 0) {
+              copy.content = typeof copy.content === 'string' && copy.content.trim() ? copy.content : null;
+            } else {
+              copy.content = typeof copy.content === 'string' ? copy.content : (copy.content ? String(copy.content) : '');
+            }
+            return copy;
+          }
+          if (copy.role === 'system') {
+            copy.content = typeof copy.content === 'string' ? copy.content : String(copy.content || '');
+            return copy;
+          }
+          if (Array.isArray(copy.content)) {
+            return copy;
+          }
+          if (typeof copy.content !== 'string') {
+            copy.content = copy.content !== undefined && copy.content !== null ? String(copy.content) : '';
+          }
+          return copy;
+        });
 
         const response = await fetch('http://127.0.0.1:8001/api/chat/completions', {
           method: 'POST',
@@ -356,7 +415,7 @@ ${EXPERIMENT_INSTRUCTIONS}`;
           },
           body: JSON.stringify({
             model: selectedModel,
-            messages: conversationMessages,
+            messages: sanitizedMessages,
             tools: apiTools,
             ...(selectedModel?.startsWith('muse-spark') || selectedModel?.startsWith('muse-wonder')
               ? { reasoning_effort: 'minimal' }
@@ -401,7 +460,7 @@ ${EXPERIMENT_INSTRUCTIONS}`;
 
         conversationMessages.push({
           role: 'assistant',
-          content: choice.message.content || null,
+          content: typeof choice.message?.content === 'string' ? choice.message.content : '',
           tool_calls: toolCalls,
         });
 
@@ -627,6 +686,39 @@ ${EXPERIMENT_INSTRUCTIONS}`;
               label: `Executed workflow "${args.workflow_id}" (${toolResult.status})`,
               status: 'success',
             });
+          } else if (fnName === 'get_workflow_logs' && toolResult?.logs) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Read ${toolResult.returned} recent workflow logs`,
+              status: 'success',
+            });
+          } else if (fnName === 'inspect_workflow_run_log' && toolResult?.run_id) {
+            toolEvents.push({
+              toolName: fnName,
+              label: `Inspected run "${toolResult.run_id}" trace (${toolResult.total_nodes_executed || 0} nodes)`,
+              status: 'success',
+            });
+          } else if (fnName === 'web_search' && toolResult?.searched) {
+            const count = toolResult.citation_count || 0;
+            const nodesInfo = toolResult.created_nodes_count ? `, created ${toolResult.created_nodes_count} finding nodes` : '';
+            toolEvents.push({
+              toolName: fnName,
+              label: `Searched web for "${args.query}" (${count} citations${nodesInfo})`,
+              status: 'success',
+            });
+          } else if (fnName === 'download_web_file' && toolResult?.downloaded) {
+            const count = toolResult.count || 1;
+            const sizeKb = Number(toolResult.size_bytes) > 0 ? `${(toolResult.size_bytes / 1024).toFixed(1)} KB` : '';
+            const sizeStr = sizeKb ? ` (${sizeKb})` : '';
+            const fname = toolResult.filename || args?.filename || 'file';
+            const label = count > 1
+              ? `Downloaded ${count} files${sizeStr}`
+              : `Downloaded "${fname}"${sizeStr}`;
+            toolEvents.push({
+              toolName: fnName,
+              label,
+              status: 'success',
+            });
           } else if (toolResult?.error) {
             toolEvents.push({
               toolName: fnName,
@@ -635,14 +727,20 @@ ${EXPERIMENT_INSTRUCTIONS}`;
             });
           }
 
-          let toolContent = JSON.stringify(toolResult);
+          let toolContent =
+            typeof toolResult === 'string'
+              ? toolResult
+              : JSON.stringify(toolResult !== undefined ? toolResult : {});
+          if (!toolContent || toolContent === 'undefined') {
+            toolContent = '{}';
+          }
           if (toolContent.length > 2500) {
             toolContent = `${toolContent.slice(0, 2500)}... (truncated)`;
           }
 
           conversationMessages.push({
             role: 'tool',
-            tool_call_id: call.id,
+            tool_call_id: call.id || `call_${iteration}`,
             content: toolContent,
           });
         }

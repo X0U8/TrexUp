@@ -1,6 +1,7 @@
 import { NODE_LIFECYCLE_DEFINITIONS } from '../../tools/nodeLifecycleTools';
 import { ENGINE_TOOL_DEFINITIONS } from '../../tools/engine';
 import { WORKFLOW_TOOL_DEFINITIONS } from '../../tools/workflowTools';
+import { LOG_TOOL_DEFINITIONS } from '../../tools/logs';
 import './ToolsPage.css';
 
 const CATEGORY_MAP = {
@@ -50,6 +51,8 @@ const CATEGORY_MAP = {
   execute_workflow: 'Execution',
   get_workflow_run_state: 'Execution',
   inspect_node_io: 'Inspection',
+  get_workflow_logs: 'Logs',
+  inspect_workflow_run_log: 'Logs',
 };
 
 const TOOL_SECTIONS = [
@@ -69,7 +72,13 @@ const TOOL_SECTIONS = [
     id: 'workflow',
     title: 'Workflow Tools',
     subtitle: 'Tools for creating, placing nodes, configuring agent intelligence, binding engines, routing threads, and executing workflow pipelines.',
-    tools: WORKFLOW_TOOL_DEFINITIONS,
+    tools: WORKFLOW_TOOL_DEFINITIONS.filter((t) => t.name !== 'get_workflow_logs' && t.name !== 'inspect_workflow_run_log'),
+  },
+  {
+    id: 'logs',
+    title: 'Execution Log Tools',
+    subtitle: 'Read-only inspection tools for tracing pipeline execution flow paths, inspecting individual node input/output payloads, and diagnosing runtime errors.',
+    tools: LOG_TOOL_DEFINITIONS,
   },
 ];
 

@@ -12,6 +12,7 @@ import Minimap from './components/Minimap/Minimap';
 import ZoomControls from './components/Controls/ZoomControls';
 import Sidebar from './components/Sidebar/Sidebar';
 import DocumentModal from './components/DocumentModal/DocumentModal';
+import ResourceDeleteModal from './components/DocumentModal/ResourceDeleteModal';
 import WorkflowDeleteModal from './components/Workflow/WorkflowDeleteModal';
 import WorkflowInfoModal from './components/Workflow/WorkflowInfoModal';
 import WorkflowRunConfirmCard from './components/Workflow/WorkflowRunConfirmCard';
@@ -22,7 +23,6 @@ import ProjectsPage from './components/Projects/ProjectsPage';
 import DocumentsPage from './components/Documents/DocumentsPage';
 import ToolsPage from './components/Tools/ToolsPage';
 import EnginesPage from './components/Engines/EnginesPage';
-import ExperimentPage from './components/Experiment/ExperimentPage';
 import LogsPage from './components/Logs/LogsPage';
 import Breadcrumbs from './components/Navigation/Breadcrumbs';
 import ModelsPanel from './components/Models/ModelsPanel';
@@ -30,7 +30,6 @@ import ModelChatPanel from './components/Chat/ModelChatPanel';
 import { executeNodeTool } from './tools/nodeLifecycleTools';
 import { runEngineTool, ENGINE_TOOL_NAMES } from './tools/engine';
 import { runWorkflowTool, WORKFLOW_TOOL_NAMES } from './tools/workflow';
-import { EXPERIMENT_TOOL_NAMES } from './tools/experiment';
 import { layoutAutoNodes, getSubtreeNodeIds } from './utils/treeLayout';
 import { saveProject, getProject, getAllProjects } from './utils/db';
 import { getEngineDisplayName, getEngineDescription, getAllEngineIds } from './utils/engineUtils';
@@ -116,8 +115,6 @@ export default function App() {
     currentWorkflowRef.current = currentWorkflow;
   }, [currentWorkflow]);
 
-  const [experiments, setExperiments] = useState(['experiment_01']);
-  const [currentExperiment, setCurrentExperiment] = useState('experiment_01');
   const [engines, setEngines] = useState(['resource_bridge', 'file_detection', 'document_extractor', 'node_context_builder']);
   const [currentEngine, setCurrentEngine] = useState('file_detection');
   const [enginesData, setEnginesData] = useState({});
@@ -142,6 +139,7 @@ export default function App() {
   const [workflowThreads, setWorkflowThreads] = useState(DEFAULT_EXTRACTION_WORKFLOW.threads);
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
   const [workflowLogs, setWorkflowLogs] = useState([]);
+  const [toolLogs, setToolLogs] = useState([]);
   const [workflowDropConfirm, setWorkflowDropConfirm] = useState(null);
   const [showManualWorkflowsModal, setShowManualWorkflowsModal] = useState(false);
   const [isDraggingWorkflow, setIsDraggingWorkflow] = useState(false);
@@ -157,6 +155,8 @@ export default function App() {
   const [workflowNodes, setWorkflowNodes] = useState(DEFAULT_EXTRACTION_WORKFLOW.nodes);
   const [showWorkflowDeleteModal, setShowWorkflowDeleteModal] = useState(false);
   const [showWorkflowInfoModal, setShowWorkflowInfoModal] = useState(false);
+  const [showResourceDeleteModal, setShowResourceDeleteModal] = useState(false);
+  const [resourceNodeToDelete, setResourceNodeToDelete] = useState(null);
   const [notification, setNotification] = useState(null);
   const [pendingToolApproval, setPendingToolApproval] = useState(null);
   const [globalDocCount, setGlobalDocCount] = useState(0);
@@ -275,8 +275,6 @@ export default function App() {
         targetHash = `#/projects/${currentProject.id}/documents`;
       } else if (currentView === 'tools') {
         targetHash = `#/projects/${currentProject.id}/tools`;
-      } else if (currentView === 'experiment') {
-        targetHash = `#/projects/${currentProject.id}/experiment/${currentExperiment}`;
       } else if (currentView === 'logs') {
         targetHash = `#/projects/${currentProject.id}/logs`;
       } else {
@@ -352,12 +350,8 @@ export default function App() {
               if (proj.currentEngine) {
                 setCurrentEngine(proj.currentEngine);
               }
-              const loadedExperiments = proj.experiments && proj.experiments.length > 0 ? proj.experiments : ['experiment_01'];
-              setExperiments(loadedExperiments);
-              if (proj.currentExperiment) {
-                setCurrentExperiment(proj.currentExperiment);
-              }
               setWorkflowLogs(proj.workflowLogs || []);
+              setToolLogs(proj.toolLogs || []);
 
               // Pre-load workflow data
               const activeWf = proj.currentWorkflow || (proj.workflows?.[0] || 'extraction');
@@ -403,11 +397,6 @@ export default function App() {
                 setCurrentView('engines');
               } else if (parts[2] === 'documents') {
                 setCurrentView('documents');
-              } else if (parts[2] === 'tools') {
-                setCurrentView('tools');
-              } else if (parts[2] === 'experiment' || parts[2] === 'experiments') {
-                if (parts[3]) setCurrentExperiment(parts[3]);
-                setCurrentView('experiment');
               } else if (parts[2] === 'logs') {
                 setCurrentView('logs');
               } else {
@@ -455,12 +444,6 @@ export default function App() {
             setCurrentView('engines');
           } else if (parts[2] === 'documents') {
             setCurrentView('documents');
-          } else if (parts[2] === 'tools') {
-            setCurrentView('tools');
-          } else if (parts[2] === 'experiment' || parts[2] === 'experiments') {
-            const expId = parts[3] || proj.currentExperiment || (experiments[0] || 'experiment_01');
-            setCurrentExperiment(expId);
-            setCurrentView('experiment');
           } else if (parts[2] === 'logs') {
             setCurrentView('logs');
           } else {
@@ -645,6 +628,12 @@ export default function App() {
       return next;
     });
     setSelectedDocNode((prev) => (prev && prev.id === id ? { ...prev, name: newName } : prev));
+  };
+
+  const handleRequestDeleteResource = (node) => {
+    if (!node) return;
+    setResourceNodeToDelete(node);
+    setShowResourceDeleteModal(true);
   };
 
   const handleDeleteResourceNode = async (nodeToDelete) => {
@@ -1181,51 +1170,55 @@ export default function App() {
         });
       }
 
-      // Execute all matched workflows in parallel
-      const workflowPromises = matchedWfs.map((matchedWf) =>
-        executeWorkflow({
-          workflowId: matchedWf.id,
-          workflowData: matchedWf.data,
-          project: currentProjectRef.current,
-          triggerPayload,
-          onExecuteTool: handleExecuteInvestigationTool,
-          onProgress: (updatedRun) => {
-            setWorkflowLogs((prev) => {
-              const existingIdx = prev.findIndex((r) => r.id === updatedRun.id);
-              if (existingIdx >= 0) {
-                const next = [...prev];
-                next[existingIdx] = updatedRun;
-                return next;
-              }
-              return [updatedRun, ...prev];
-            });
-
-            // If bridge resolved local file path, attach it while keeping extracting active
-            const bridgeNode = updatedRun.nodes?.engine_bridge;
-            const resolvedPath = bridgeNode?.outputData?.local_path || bridgeNode?.outputData?.file_path;
-            if (targetDocId && resolvedPath) {
-              setNodes((prev) => {
-                const targetDoc = prev[targetDocId];
-                if (!targetDoc || targetDoc.local_path === resolvedPath) return prev;
-                const next = {
-                  ...prev,
-                  [targetDocId]: {
-                    ...targetDoc,
-                    local_path: resolvedPath,
-                    extracting: true,
-                    status: 'extracting',
-                    updatedAt: new Date().toISOString(),
-                  },
-                };
-                persistProjectNodes(next);
-                return next;
+      // Execute all matched workflows sequentially (one by one) to prevent API concurrency collisions
+      const runResults = [];
+      for (const matchedWf of matchedWfs) {
+        try {
+          const runRes = await executeWorkflow({
+            workflowId: matchedWf.id,
+            workflowData: matchedWf.data,
+            project: currentProjectRef.current,
+            triggerPayload,
+            onExecuteTool: handleExecuteInvestigationTool,
+            onProgress: (updatedRun) => {
+              setWorkflowLogs((prev) => {
+                const existingIdx = prev.findIndex((r) => r.id === updatedRun.id);
+                if (existingIdx >= 0) {
+                  const next = [...prev];
+                  next[existingIdx] = updatedRun;
+                  return next;
+                }
+                return [updatedRun, ...prev];
               });
-            }
-          },
-        })
-      );
 
-      const runResults = await Promise.allSettled(workflowPromises);
+              // If bridge resolved local file path, attach it while keeping extracting active
+              const bridgeNode = updatedRun.nodes?.engine_bridge;
+              const resolvedPath = bridgeNode?.outputData?.local_path || bridgeNode?.outputData?.file_path;
+              if (targetDocId && resolvedPath) {
+                setNodes((prev) => {
+                  const targetDoc = prev[targetDocId];
+                  if (!targetDoc || targetDoc.local_path === resolvedPath) return prev;
+                  const next = {
+                    ...prev,
+                    [targetDocId]: {
+                      ...targetDoc,
+                      local_path: resolvedPath,
+                      extracting: true,
+                      status: 'extracting',
+                      updatedAt: new Date().toISOString(),
+                    },
+                  };
+                  persistProjectNodes(next);
+                  return next;
+                });
+              }
+            },
+          });
+          runResults.push({ status: 'fulfilled', value: runRes });
+        } catch (wfErr) {
+          runResults.push({ status: 'rejected', reason: wfErr });
+        }
+      }
       const successfulRuns = runResults
         .filter((r) => r.status === 'fulfilled' && r.value)
         .map((r) => r.value);
@@ -2020,105 +2013,6 @@ export default function App() {
     setShowWorkflowDeleteModal(false);
   };
 
-  const handleSelectExperiment = (expId) => {
-    setCurrentExperiment(expId);
-    setCurrentView('experiment');
-    if (currentProjectRef.current) {
-      const updatedProject = {
-        ...currentProjectRef.current,
-        currentExperiment: expId,
-        updatedAt: new Date().toISOString(),
-      };
-      currentProjectRef.current = updatedProject;
-      setCurrentProject(updatedProject);
-      saveProject(updatedProject).catch((err) => console.error('Failed to save selected experiment:', err));
-    }
-  };
-
-  const handleCreateExperiment = () => {
-    const count = experiments.length;
-    let nextName = `experiment_${String(count + 1).padStart(2, '0')}`;
-    let suffix = count + 1;
-    while (experiments.includes(nextName)) {
-      suffix++;
-      nextName = `experiment_${String(suffix).padStart(2, '0')}`;
-    }
-
-    setExperiments((prev) => {
-      const next = [...prev, nextName];
-      setCurrentExperiment(nextName);
-      setCurrentView('experiment');
-      if (currentProjectRef.current) {
-        const updatedProject = {
-          ...currentProjectRef.current,
-          experiments: next,
-          currentExperiment: nextName,
-          experimentsData: {
-            ...(currentProjectRef.current.experimentsData || {}),
-            [nextName]: {
-              name: nextName,
-              plan: [],
-              nodes: {},
-              connections: {},
-              findings: [],
-              artifacts: [],
-              report: '',
-              createdAt: new Date().toISOString(),
-            },
-          },
-          updatedAt: new Date().toISOString(),
-        };
-        currentProjectRef.current = updatedProject;
-        setCurrentProject(updatedProject);
-        saveProject(updatedProject).catch((err) => console.error('Failed to save new experiment:', err));
-      }
-      return next;
-    });
-  };
-
-  const handleRenameExperiment = (expId, newName) => {
-    const sanitized = (newName || '').replace(/[^a-zA-Z0-9_\- ]/g, '').trim();
-    if (!sanitized || !currentProjectRef.current) return;
-
-    const baseData = currentProjectRef.current.experimentsData?.[expId] || {};
-    const updatedExpData = {
-      ...(currentProjectRef.current.experimentsData || {}),
-      [expId]: {
-        ...baseData,
-        name: sanitized,
-      },
-    };
-    const updatedProject = {
-      ...currentProjectRef.current,
-      experimentsData: updatedExpData,
-      updatedAt: new Date().toISOString(),
-    };
-    currentProjectRef.current = updatedProject;
-    setCurrentProject(updatedProject);
-    saveProject(updatedProject).catch((err) => console.error('Failed to rename experiment:', err));
-  };
-
-  const handleUpdateExperimentData = (expId, updates) => {
-    if (!currentProjectRef.current) return;
-    const target = expId || currentExperiment;
-    const currentExp = currentProjectRef.current.experimentsData?.[target] || {};
-    const updatedProject = {
-      ...currentProjectRef.current,
-      experimentsData: {
-        ...(currentProjectRef.current.experimentsData || {}),
-        [target]: {
-          ...currentExp,
-          ...updates,
-          updatedAt: new Date().toISOString(),
-        },
-      },
-      updatedAt: new Date().toISOString(),
-    };
-    currentProjectRef.current = updatedProject;
-    setCurrentProject(updatedProject);
-    saveProject(updatedProject).catch((err) => console.error('Failed to update experiment data:', err));
-  };
-
   const handleSelectEngine = (engName) => {
     setCurrentEngine(engName);
     setCurrentView('engines');
@@ -2397,7 +2291,6 @@ def run(input_data, context=None):
   const handleSelectProject = async (project) => {
     if (!project || !project.id) return;
     try {
-      setIsProjectLoading(true);
       setLoadingProjectName(project.name || '');
 
       // Load full project details from IndexedDB (lightweight list avoids memory issues)
@@ -2424,12 +2317,8 @@ def run(input_data, context=None):
       if (fullProject.enginesData) {
         setEnginesData(fullProject.enginesData);
       }
-      const loadedExperiments = fullProject.experiments && fullProject.experiments.length > 0 ? fullProject.experiments : ['experiment_01'];
-      setExperiments(loadedExperiments);
-      if (fullProject.currentExperiment) {
-        setCurrentExperiment(fullProject.currentExperiment);
-      }
       setWorkflowLogs(fullProject.workflowLogs || []);
+      setToolLogs(fullProject.toolLogs || []);
 
       const activeWf = fullProject.currentWorkflow || 'extraction';
       setCurrentWorkflow(activeWf);
@@ -2634,10 +2523,43 @@ def run(input_data, context=None):
           engines: getAllEngineIds(engines, proj?.engines || []),
           enginesData: proj?.enginesData || enginesData,
           isWorkflowRunning: isWorkflowRunning,
+          workflowLogs: workflowLogs || proj?.workflowLogs || [],
+          onWorkflowProgress: (updatedRun) => {
+            setWorkflowLogs((prev) => {
+              const existingIdx = prev.findIndex((r) => r.id === updatedRun.id);
+              if (existingIdx >= 0) {
+                const next = [...prev];
+                next[existingIdx] = updatedRun;
+                return next;
+              }
+              return [updatedRun, ...prev];
+            });
+          },
+          onExecuteTool: handleExecuteInvestigationTool,
         },
         toolName,
         args || {}
       );
+
+      if (res.run_record || res.runRecord) {
+        const record = res.run_record || res.runRecord;
+        setWorkflowLogs((prev) => {
+          const existingIdx = prev.findIndex((r) => r.id === record.id);
+          const updated = existingIdx >= 0
+            ? prev.map((r, i) => (i === existingIdx ? record : r))
+            : [record, ...prev];
+          if (currentProjectRef.current) {
+            const updatedProject = {
+              ...currentProjectRef.current,
+              workflowLogs: updated,
+              updatedAt: new Date().toISOString(),
+            };
+            currentProjectRef.current = updatedProject;
+            saveProject(updatedProject).catch((err) => console.error('Failed to save tool run logs:', err));
+          }
+          return updated;
+        });
+      }
 
       if (res.updatedWorkflows || res.updatedWorkflowsData || res.currentWorkflow) {
         const nextWorkflows = res.updatedWorkflows || workflows;
@@ -2698,288 +2620,166 @@ def run(input_data, context=None):
     }
   };
 
-  const handleExecuteExperimentTool = async (toolName, args) => {
-    if (toolName === 'propose_experiment') {
-      const approved = await new Promise((resolve) => {
-        setPendingToolApproval({
-          id: Math.random().toString(36).substring(2, 9),
-          toolName,
-          actionType: 'experiment',
-          itemLabel: `"${args?.title || 'New Experiment'}"`,
-          question: `Start experiment: "${args?.title || 'New Experiment'}"?`,
-          subtext: args?.objective ? `Objective: ${args.objective}` : 'Approving will create the experiment and begin the research plan.',
-          args,
-          timeoutSeconds: 30,
-          resolve,
-        });
-      });
+  const recordToolExecution = (toolName, args, res, durationMs) => {
+    const isDenied = Boolean(res?.denied);
+    const isError = Boolean(res?.error) && !isDenied;
+    const status = isDenied ? 'denied' : isError ? 'failed' : 'success';
 
-      setPendingToolApproval(null);
+    const toolRecord = {
+      id: `tool_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      toolName,
+      category: ENGINE_TOOL_NAMES.includes(toolName)
+        ? 'engine'
+        : WORKFLOW_TOOL_NAMES.includes(toolName)
+        ? 'workflow'
+        : 'canvas',
+      args,
+      result: res,
+      status,
+      startTime: new Date().toLocaleTimeString(),
+      duration: `${Math.round(durationMs)}ms`,
+      timestamp: Date.now(),
+    };
 
-      if (!approved) {
-        return {
-          error: 'User denied permission to start the experiment.',
-          denied: true,
-          status: 'denied',
-        };
-      }
-
-      // User approved! Create the experiment in IndexedDB
-      const count = experiments.length;
-      let nextName = `experiment_${String(count + 1).padStart(2, '0')}`;
-      let suffix = count + 1;
-      while (experiments.includes(nextName)) {
-        suffix++;
-        nextName = `experiment_${String(suffix).padStart(2, '0')}`;
-      }
-
-      const initialData = {
-        id: nextName,
-        title: args?.title || `Experiment ${suffix}`,
-        objective: args?.objective || '',
-        hypothesis: args?.hypothesis || '',
-        plan: [],
-        findings: [],
-        artifacts: [],
-        report: '',
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      // Update state and project in IndexedDB
-      setExperiments((prev) => (prev.includes(nextName) ? prev : [...prev, nextName]));
-      setCurrentExperiment(nextName);
-      setCurrentView('experiment');
-
+    setToolLogs((prev) => {
+      const next = [toolRecord, ...prev];
       if (currentProjectRef.current) {
-        const updatedProject = {
-          ...currentProjectRef.current,
-          experiments: currentProjectRef.current.experiments?.includes(nextName)
-            ? currentProjectRef.current.experiments
-            : [...(currentProjectRef.current.experiments || []), nextName],
-          currentExperiment: nextName,
-          experimentsData: {
-            ...(currentProjectRef.current.experimentsData || {}),
-            [nextName]: initialData,
-          },
-          updatedAt: new Date().toISOString(),
-        };
-        currentProjectRef.current = updatedProject;
-        saveProject(updatedProject).catch((err) => console.error('Failed to save project experiment to IndexedDB:', err));
+        currentProjectRef.current = { ...currentProjectRef.current, toolLogs: next };
+        saveProject(currentProjectRef.current).catch(() => {});
       }
-
-      return {
-        status: 'success',
-        experiment_id: nextName,
-        title: initialData.title,
-        message: `Experiment "${initialData.title}" created and activated on the canvas. Now call set_experiment_plan to formulate the step-by-step flowchart plan.`,
-      };
-    }
-
-    const expId = args?.experiment_id || currentExperiment;
-    const currentExp = currentProjectRef.current?.experimentsData?.[expId] || {};
-
-    if (toolName === 'set_experiment_plan') {
-      const updatedPlan = (args?.plan || []).map((step, idx) => ({
-        id: `step_${step.step_number || idx + 1}`,
-        step_number: step.step_number || idx + 1,
-        title: step.title || `Step ${idx + 1}`,
-        description: step.description || '',
-        status: step.status || 'pending',
-      }));
-      const updatedExp = {
-        ...currentExp,
-        plan: updatedPlan,
-        updatedAt: new Date().toISOString(),
-      };
-      handleUpdateExperimentData(expId, updatedExp);
-      return {
-        status: 'success',
-        experiment_id: expId,
-        steps_count: updatedPlan.length,
-        message: `Plan established with ${updatedPlan.length} steps. Flowchart is now visible on the canvas. Proceed by setting the first step to 'in_progress' and executing the investigation.`,
-      };
-    }
-
-    if (toolName === 'update_experiment_step') {
-      const plan = Array.isArray(currentExp.plan) ? [...currentExp.plan] : [];
-      const stepIdx = plan.findIndex((s) => s.step_number === args?.step_number);
-      if (stepIdx >= 0) {
-        plan[stepIdx] = {
-          ...plan[stepIdx],
-          status: args.status || plan[stepIdx].status,
-          ...(args.notes ? { notes: args.notes } : {}),
-        };
-      }
-      const updatedExp = { ...currentExp, plan, updatedAt: new Date().toISOString() };
-      handleUpdateExperimentData(expId, updatedExp);
-      return { status: 'success', step_number: args?.step_number, new_status: args?.status };
-    }
-
-    if (toolName === 'record_experiment_finding') {
-      const findings = Array.isArray(currentExp.findings) ? [...currentExp.findings] : [];
-      findings.push({
-        id: `find_${Date.now()}`,
-        title: args?.title || 'Untitled Finding',
-        proof: args?.proof || '',
-        details: args?.details || '',
-        createdAt: new Date().toISOString(),
-      });
-      const updatedExp = { ...currentExp, findings, updatedAt: new Date().toISOString() };
-      handleUpdateExperimentData(expId, updatedExp);
-      return { status: 'success', total_findings: findings.length };
-    }
-
-    if (toolName === 'record_experiment_artifact') {
-      const artifacts = Array.isArray(currentExp.artifacts) ? [...currentExp.artifacts] : [];
-      artifacts.push({
-        id: `art_${Date.now()}`,
-        name: args?.name || 'Artifact',
-        type: args?.type || 'document',
-        content: args?.content || '',
-        url: args?.url || '',
-        createdAt: new Date().toISOString(),
-      });
-      const updatedExp = { ...currentExp, artifacts, updatedAt: new Date().toISOString() };
-      handleUpdateExperimentData(expId, updatedExp);
-      return { status: 'success', total_artifacts: artifacts.length };
-    }
-
-    if (toolName === 'finalize_experiment_report') {
-      const updatedExp = {
-        ...currentExp,
-        report: args?.report || '',
-        status: 'completed',
-        updatedAt: new Date().toISOString(),
-      };
-      handleUpdateExperimentData(expId, updatedExp);
-      return { status: 'success', message: 'Report finalized and published to the Report tab.' };
-    }
-
-    return { error: `Unknown experiment tool: ${toolName}` };
+      return next;
+    });
   };
 
   const handleExecuteInvestigationTool = async (toolName, args) => {
-    // Intercept destructive / deletion tool calls for user permission
-    const isDeletion =
-      toolName === 'delete_node' ||
-      toolName === 'remove_connection' ||
-      toolName === 'delete_workflow' ||
-      toolName === 'delete_workflow_node' ||
-      toolName === 'delete_engine' ||
-      toolName.startsWith('delete_') ||
-      toolName.startsWith('remove_');
+    const startMs = performance.now();
+    let res = null;
+    try {
+      res = await (async () => {
+      // Intercept destructive / deletion tool calls for user permission
+      const isDeletion =
+        toolName === 'delete_node' ||
+        toolName === 'remove_connection' ||
+        toolName === 'delete_workflow' ||
+        toolName === 'delete_workflow_node' ||
+        toolName === 'delete_engine' ||
+        toolName.startsWith('delete_') ||
+        toolName.startsWith('remove_');
 
-    if (isDeletion) {
-      let itemLabel = toolName.replace(/_/g, ' ');
-      if (toolName === 'delete_node') {
-        const targetExp = args?.exploration_id || currentExploration;
-        const expNodes =
-          currentProjectRef.current?.explorationsData?.[targetExp]?.nodes || nodesRef.current || {};
-        if (args.delete_all || args.node_id === 'all' || args.node_id === '*') {
-          itemLabel = 'all exploration nodes';
-        } else if (Array.isArray(args.node_ids)) {
-          itemLabel = `${args.node_ids.length} exploration nodes`;
-        } else if (args.node_id) {
-          const n = expNodes[args.node_id];
-          const type = n?.category || n?.type || 'node';
-          itemLabel = `${type} "${n?.title || n?.name || args.node_id}"`;
+      if (isDeletion) {
+        let itemLabel = toolName.replace(/_/g, ' ');
+        if (toolName === 'delete_node') {
+          const targetExp = args?.exploration_id || currentExploration;
+          const expNodes =
+            currentProjectRef.current?.explorationsData?.[targetExp]?.nodes || nodesRef.current || {};
+          if (args.delete_all || args.node_id === 'all' || args.node_id === '*') {
+            itemLabel = 'all exploration nodes';
+          } else if (Array.isArray(args.node_ids)) {
+            itemLabel = `${args.node_ids.length} exploration nodes`;
+          } else if (args.node_id) {
+            const n = expNodes[args.node_id];
+            const type = n?.category || n?.type || 'node';
+            itemLabel = `${type} "${n?.title || n?.name || args.node_id}"`;
+          }
+        } else if (toolName === 'remove_connection') {
+          itemLabel = `thread "${args.connection_id}"`;
+        } else if (toolName === 'delete_workflow') {
+          itemLabel = `workflow "${args.workflow_name || args.workflow_id || args.name || ''}"`;
+        } else if (toolName === 'delete_workflow_node') {
+          itemLabel = `workflow node "${args.node_id}"`;
+        } else if (toolName === 'delete_engine') {
+          itemLabel = `engine "${args.engine_id || args.name || ''}"`;
         }
-      } else if (toolName === 'remove_connection') {
-        itemLabel = `thread "${args.connection_id}"`;
-      } else if (toolName === 'delete_workflow') {
-        itemLabel = `workflow "${args.workflow_name || args.workflow_id || args.name || ''}"`;
-      } else if (toolName === 'delete_workflow_node') {
-        itemLabel = `workflow node "${args.node_id}"`;
-      } else if (toolName === 'delete_engine') {
-        itemLabel = `engine "${args.engine_id || args.name || ''}"`;
-      }
 
-      const approved = await new Promise((resolve) => {
-        setPendingToolApproval({
-          id: Math.random().toString(36).substring(2, 9),
-          toolName,
-          itemLabel,
-          args,
-          timeoutSeconds: 30,
-          resolve,
+        const approved = await new Promise((resolve) => {
+          setPendingToolApproval({
+            id: Math.random().toString(36).substring(2, 9),
+            toolName,
+            itemLabel,
+            args,
+            timeoutSeconds: 30,
+            resolve,
+          });
         });
-      });
 
-      setPendingToolApproval(null);
+        setPendingToolApproval(null);
 
-      if (!approved) {
-        return {
-          error: `User denied permission to execute ${toolName} for ${itemLabel}. Action not allowed.`,
-          denied: true,
-          status: 'denied',
-        };
-      }
-    }
-
-    if (EXPERIMENT_TOOL_NAMES.includes(toolName)) {
-      return handleExecuteExperimentTool(toolName, args);
-    }
-    if (ENGINE_TOOL_NAMES.includes(toolName)) {
-      return handleExecuteEngineTool(toolName, args);
-    }
-    if (WORKFLOW_TOOL_NAMES.includes(toolName)) {
-      return handleExecuteWorkflowTool(toolName, args);
-    }
-    const targetExp = args?.exploration_id || currentExploration;
-    const currentExpNodes =
-      targetExp === currentExploration
-        ? nodesRef.current
-        : currentProjectRef.current?.explorationsData?.[targetExp]?.nodes || {};
-    const currentExpConnections =
-      targetExp === currentExploration
-        ? connectionsRef.current
-        : currentProjectRef.current?.explorationsData?.[targetExp]?.connections || {};
-
-    const res = executeNodeTool(
-      {
-        ...(currentProjectRef.current?.explorationsData || {}),
-        [targetExp]: { nodes: currentExpNodes, connections: currentExpConnections },
-      },
-      targetExp,
-      toolName,
-      args
-    );
-
-    let nextNodes = currentExpNodes;
-    let nextConnections = currentExpConnections;
-
-    if (res.updatedNodes || res.updatedConnections) {
-      // Nodes created by this tool call are AI-generated: flag them for auto layout, then arrange
-      // the tree. Nodes the user has dragged (userMoved) and resources are never repositioned.
-      const base = res.updatedNodes || currentExpNodes;
-      const flagged = { ...base };
-      for (const id of Object.keys(base)) {
-        if (!currentExpNodes[id] && base[id].type !== 'document' && base[id].category !== 'resource') {
-          flagged[id] = { ...base[id], autoLayout: true };
+        if (!approved) {
+          return {
+            error: `User denied permission to execute ${toolName} for ${itemLabel}. Action not allowed.`,
+            denied: true,
+            status: 'denied',
+          };
         }
       }
-      res.updatedNodes = layoutAutoNodes(flagged, res.updatedConnections || currentExpConnections);
-    }
 
-    if (res.updatedNodes) {
-      nextNodes = res.updatedNodes;
-      if (targetExp === currentExploration) {
-        nodesRef.current = res.updatedNodes;
-        setNodes(res.updatedNodes);
+      if (ENGINE_TOOL_NAMES.includes(toolName)) {
+        return handleExecuteEngineTool(toolName, args);
       }
-    }
-
-    if (res.updatedConnections) {
-      nextConnections = res.updatedConnections;
-      if (targetExp === currentExploration) {
-        connectionsRef.current = res.updatedConnections;
-        setConnections(res.updatedConnections);
+      if (WORKFLOW_TOOL_NAMES.includes(toolName)) {
+        return handleExecuteWorkflowTool(toolName, args);
       }
+      const targetExp = args?.exploration_id || currentExploration;
+      const currentExpNodes =
+        targetExp === currentExploration
+          ? nodesRef.current
+          : currentProjectRef.current?.explorationsData?.[targetExp]?.nodes || {};
+      const currentExpConnections =
+        targetExp === currentExploration
+          ? connectionsRef.current
+          : currentProjectRef.current?.explorationsData?.[targetExp]?.connections || {};
+
+      const toolExecutionResult = await executeNodeTool(
+        {
+          ...(currentProjectRef.current?.explorationsData || {}),
+          [targetExp]: { nodes: currentExpNodes, connections: currentExpConnections },
+        },
+        targetExp,
+        toolName,
+        args
+      );
+
+      let nextNodes = currentExpNodes;
+      let nextConnections = currentExpConnections;
+
+      if (toolExecutionResult.updatedNodes || toolExecutionResult.updatedConnections) {
+        // Nodes created by this tool call are AI-generated: flag them for auto layout, then arrange
+        // the tree. Nodes the user has dragged (userMoved) and resources are never repositioned.
+        const base = toolExecutionResult.updatedNodes || currentExpNodes;
+        const flagged = { ...base };
+        for (const id of Object.keys(base)) {
+          if (!currentExpNodes[id] && base[id].type !== 'document' && base[id].category !== 'resource') {
+            flagged[id] = { ...base[id], autoLayout: true };
+          }
+        }
+        toolExecutionResult.updatedNodes = layoutAutoNodes(flagged, toolExecutionResult.updatedConnections || currentExpConnections);
+      }
+
+      if (toolExecutionResult.updatedNodes) {
+        nextNodes = toolExecutionResult.updatedNodes;
+        if (targetExp === currentExploration) {
+          nodesRef.current = toolExecutionResult.updatedNodes;
+          setNodes(toolExecutionResult.updatedNodes);
+        }
+      }
+
+      if (toolExecutionResult.updatedConnections) {
+        nextConnections = toolExecutionResult.updatedConnections;
+        if (targetExp === currentExploration) {
+          connectionsRef.current = toolExecutionResult.updatedConnections;
+          setConnections(toolExecutionResult.updatedConnections);
+        }
+      }
+
+      persistProjectNodes(nextNodes, targetExp, nextConnections);
+      return toolExecutionResult;
+    })();
+    } catch (err) {
+      console.error(`Tool execution error in ${toolName}:`, err);
+      res = { error: err?.message || String(err), status: 'failed' };
     }
 
-    persistProjectNodes(nextNodes, targetExp, nextConnections);
+    recordToolExecution(toolName, args, res, performance.now() - startMs);
     return res;
   };
 
@@ -3029,8 +2829,15 @@ def run(input_data, context=None):
         }}
       />
 
-      {/* Top Floating Navigation: Hamburger + Breadcrumb Nav Line */}
+      {/* Top Floating Navigation: Logo + Hamburger + Breadcrumb Nav Line */}
       <header className="top-nav-bar">
+        <img
+          src="/logo.jpg"
+          alt="Trex"
+          className="top-nav-logo"
+          onClick={handleGoToProjects}
+          title="Trex"
+        />
         <Sidebar
           onGoToProjects={handleGoToProjects}
           onOpenDocuments={() => setCurrentView('documents')}
@@ -3054,12 +2861,6 @@ def run(input_data, context=None):
           onSelectWorkflow={handleSelectWorkflow}
           onCreateWorkflow={handleCreateWorkflow}
           onRenameWorkflow={handleRenameWorkflow}
-          experiments={experiments}
-          experimentsData={currentProject?.experimentsData || {}}
-          currentExperiment={currentExperiment}
-          onSelectExperiment={handleSelectExperiment}
-          onCreateExperiment={handleCreateExperiment}
-          onRenameExperiment={handleRenameExperiment}
           engines={engines}
           enginesData={enginesData}
           currentEngine={currentEngine}
@@ -3082,7 +2883,6 @@ def run(input_data, context=None):
           explorationName={currentExploration}
           workflowName={currentWorkflow}
           engineName={currentEngine}
-          experimentName={currentProject?.experimentsData?.[currentExperiment]?.name || currentExperiment}
           onGoToProjects={handleGoToProjects}
         />
       </header>
@@ -3090,9 +2890,10 @@ def run(input_data, context=None):
       {/* Global Floating Model Chat (Persistent in IndexedDB across views & reloads) */}
       <ModelChatPanel
         currentExploration={currentExploration}
-        currentExperiment={currentExperiment}
-        experimentData={currentProject?.experimentsData?.[currentExperiment] || {}}
         nodes={nodes}
+        engines={engines}
+        enginesData={enginesData}
+        workflows={currentProject?.workflows || {}}
         onExecuteTool={handleExecuteInvestigationTool}
         focusedNode={chatFocusNode}
         onClearFocusedNode={() => setChatFocusNode(null)}
@@ -3102,9 +2903,12 @@ def run(input_data, context=None):
       {/* Documents Page View, Tools Page View, Synthesis Page View, Logs Page View, Workflow Canvas View, or Exploration Canvas View */}
       {currentView === 'documents' ? (
         <DocumentsPage
+          currentExploration={currentExploration}
+          currentProject={currentProject}
+          onBackToCanvas={() => setCurrentView('canvas')}
           onOpenDocument={async (doc) => {
             try {
-              const proj = await getProject(doc.projectId);
+              const proj = doc.projectId ? await getProject(doc.projectId) : currentProject;
               if (proj) {
                 setCurrentProject(proj);
                 const exps = proj.explorations && proj.explorations.length > 0
@@ -3112,7 +2916,7 @@ def run(input_data, context=None):
                   : ['exploration_01'];
                 setExplorations(exps);
 
-                const expName = doc.explorationName || 'exploration_01';
+                const expName = doc.explorationName || currentExploration || 'exploration_01';
                 setCurrentExploration(expName);
 
                 const expNodes = proj.explorationsData?.[expName]?.nodes || proj.nodes || {};
@@ -3133,17 +2937,48 @@ def run(input_data, context=None):
               console.error('Failed to open document in project:', err);
             }
           }}
+          onAddDocumentToCanvas={async (doc) => {
+            const expName = currentExploration || 'exploration_01';
+            const shortHash = Math.random().toString(36).substring(2, 8);
+            const nodeId = `node_doc_${shortHash}`;
+            const targetX = 300;
+            const targetY = 240;
+            const newDocNode = {
+              id: nodeId,
+              node_id: nodeId,
+              name: doc.name || doc.filename || 'Document',
+              title: doc.name || doc.filename || 'Document',
+              fileSize: doc.fileSize || doc.size_bytes || 0,
+              type: 'document',
+              node_type: 'document',
+              category: 'resource',
+              status: 'active',
+              local_path: doc.local_path || doc.localPath || '',
+              localPath: doc.local_path || doc.localPath || '',
+              url: doc.url || '',
+              mime_type: doc.mime_type || '',
+              x: targetX,
+              y: targetY,
+              width: 280,
+              height: 72,
+              autoLayout: true,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+
+            const expNodes = nodesRef.current || {};
+            const nextNodes = layoutAutoNodes({ ...expNodes, [nodeId]: newDocNode }, connectionsRef.current);
+            setNodes(nextNodes);
+            nodesRef.current = nextNodes;
+            persistProjectNodes(nextNodes, expName);
+            setSelectedDocNode(newDocNode);
+            setCurrentView('canvas');
+          }}
         />
       ) : currentView === 'tools' ? (
         <ToolsPage />
-      ) : currentView === 'experiment' ? (
-        <ExperimentPage
-          experimentId={currentExperiment}
-          experimentData={currentProject?.experimentsData?.[currentExperiment] || {}}
-          onUpdateExperimentData={handleUpdateExperimentData}
-        />
       ) : currentView === 'logs' ? (
-        <LogsPage workflowLogs={workflowLogs} />
+        <LogsPage workflowLogs={workflowLogs} toolLogs={toolLogs} />
       ) : currentView === 'engines' ? (
         <EnginesPage
           engines={engines}
@@ -3470,7 +3305,24 @@ def run(input_data, context=None):
             isOpen={!!selectedDocNode}
             onClose={() => setSelectedDocNode(null)}
             onRename={handleRenameNode}
-            onDelete={handleDeleteResourceNode}
+            onDelete={handleRequestDeleteResource}
+          />
+
+          {/* Resource Node Delete Confirmation Modal */}
+          <ResourceDeleteModal
+            isOpen={showResourceDeleteModal}
+            node={resourceNodeToDelete}
+            onClose={() => {
+              setShowResourceDeleteModal(false);
+              setResourceNodeToDelete(null);
+            }}
+            onConfirm={() => {
+              if (resourceNodeToDelete) {
+                handleDeleteResourceNode(resourceNodeToDelete);
+              }
+              setShowResourceDeleteModal(false);
+              setResourceNodeToDelete(null);
+            }}
           />
 
           {/* Exploration Dot Grid Canvas with Direct File Drag & Drop and Relationship Ports */}

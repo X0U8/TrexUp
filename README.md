@@ -1,28 +1,46 @@
-# Trex Up 🚀
+<div align="center">
+  <img src="./assets/logo.jpg" alt="Trex Logo" width="128" style="border-radius: 50%;" />
+  <h1>Trex</h1>
+  <p>A visual canvas and workspace for AI-powered exploration, workflow orchestration, and document analysis.</p>
+</div>
 
-Autonomous Multi-Modal Experimental & Verification Agent built for the **Meta Global AI Developer Hackathon**.
+---
 
-## Architecture Pattern
+## Getting Started
 
-Following Meta's verifiable agent blueprint:
+### Prerequisites
 
-- `agent/`: The autonomous agentic loop (`Plan -> Act -> Observe`), tool registry, and multi-tier verification checks.
-- `cases/`: The case/scenario dossiers, objectives, documents, and visual inputs.
-- `ground_truth/`: Benchmark evaluation criteria and ground-truth standards.
-- `world/`: The simulation environment / outside world interactions.
-- `ui/`: The interactive real-time visual console for monitoring agent progress and human-in-the-loop sign-off.
+- [Node.js](https://nodejs.org/) (v18+ recommended)
+- `npm`
 
-## Run the engine server
+### Frontend Setup
 
-The backend (`agent/server.py`) runs engines and calls the Meta models on `http://127.0.0.1:8001`. It needs `openai` and `pypdf`. On macOS with Homebrew Python, `pip install` outside a virtual environment is blocked (PEP 668), so use a venv:
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
 
-```bash
-cd agent
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python server.py
-```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-Bring your own key: create `agent/.env` with `MODEL_API_KEY=...` (and optionally `MODEL_API_BASE_URL`, default `https://api.meta.ai/v1`). The file is gitignored.
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
-Restart the server after any change to `server.py`. The Engines page's **Download server.py** button gives you the same file, but it needs the same venv and `.env` next to it.
+4. Open your browser and visit:
+   ```
+   http://localhost:5173
+   ```
+
+### Backend
+
+The backend server setup, status, and download are available directly inside the app interface. Click the **Server** indicator in the top navigation bar to configure or run the local engine.
+
+---
+
+## Demo & Screenshots
+
+<!-- Video and screenshots will be added here -->

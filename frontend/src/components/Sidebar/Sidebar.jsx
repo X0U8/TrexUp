@@ -20,12 +20,6 @@ export default function Sidebar({
   onSelectWorkflow,
   onCreateWorkflow,
   onRenameWorkflow,
-  experiments = ['experiment_01'],
-  experimentsData = {},
-  currentExperiment = 'experiment_01',
-  onSelectExperiment,
-  onCreateExperiment,
-  onRenameExperiment,
   engines = ['file_detection', 'document_extractor'],
   enginesData = {},
   currentEngine = 'file_detection',
@@ -39,7 +33,6 @@ export default function Sidebar({
   const [isOpen, setIsOpen] = useState(false);
   const [isExplorationOpen, setIsExplorationOpen] = useState(true);
   const [isWorkflowOpen, setIsWorkflowOpen] = useState(true);
-  const [isExperimentOpen, setIsExperimentOpen] = useState(true);
   const [isEnginesOpen, setIsEnginesOpen] = useState(true);
   const [editingKey, setEditingKey] = useState(null);
   const [editValue, setEditValue] = useState('');
@@ -56,8 +49,6 @@ export default function Sidebar({
         onRenameExploration?.(uid, sanitized);
       } else if (type === 'wf') {
         onRenameWorkflow?.(uid, sanitized);
-      } else if (type === 'experiment') {
-        onRenameExperiment?.(uid, sanitized);
       }
     }
     setEditingKey(null);
@@ -471,111 +462,7 @@ export default function Sidebar({
             )}
           </div>
 
-          {/* Experiments Section (Expandable with + and chevron) */}
-          <div className="drawer-nav-group">
-            <div
-              className={`drawer-item exploration-row ${isExperimentOpen ? 'expanded' : ''} ${currentView === 'experiment' ? 'active' : ''}`}
-              onClick={() => setIsExperimentOpen((prev) => !prev)}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10 2v7.5L4.5 19.5A2 2 0 0 0 6.2 22h11.6a2 2 0 0 0 1.7-2.5L14 9.5V2" />
-                <path d="M8.5 2h7" />
-                <path d="M7 16h10" />
-              </svg>
-              <span className="drawer-item-title">Experiment</span>
 
-              <div className="exploration-controls" onClick={(e) => e.stopPropagation()}>
-                <button
-                  type="button"
-                  className="exploration-icon-btn"
-                  title="Create new experiment"
-                  aria-label="New experiment"
-                  onClick={() => {
-                    onCreateExperiment?.();
-                    setIsExperimentOpen(true);
-                  }}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                </button>
-
-                <button
-                  type="button"
-                  className={`exploration-icon-btn chevron ${isExperimentOpen ? 'rotated' : ''}`}
-                  title={isExperimentOpen ? 'Collapse experiments' : 'Expand experiments'}
-                  aria-label="Toggle experiments list"
-                  onClick={() => setIsExperimentOpen((prev) => !prev)}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            {isExperimentOpen && (
-              <div className="exploration-sublist">
-                {experiments.map((expId) => {
-                  const isActive = currentView === 'experiment' && expId === currentExperiment;
-                  const displayName = experimentsData?.[expId]?.name || expId;
-                  const isEditing = editingKey === `experiment:${expId}`;
-
-                  return (
-                    <div key={expId} className="exploration-subitem-wrap">
-                      {isEditing ? (
-                        <div className="subitem-rename-box" onClick={(e) => e.stopPropagation()}>
-                          <span className="exploration-subdot" />
-                          <input
-                            type="text"
-                            className="subitem-rename-input"
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value.replace(/[^a-zA-Z0-9_\- ]/g, ''))}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveRename('experiment', expId);
-                              if (e.key === 'Escape') handleCancelRename();
-                            }}
-                            onBlur={() => handleSaveRename('experiment', expId)}
-                            autoFocus
-                            maxLength={35}
-                            placeholder="Experiment name"
-                          />
-                        </div>
-                      ) : (
-                        <div
-                          className={`exploration-subitem ${isActive ? 'active' : ''}`}
-                          onClick={() => {
-                            onSelectExperiment?.(expId);
-                            setIsOpen(false);
-                          }}
-                          title={`${displayName} (${expId})`}
-                        >
-                          <span className="exploration-subdot" />
-                          <span className="exploration-subname">{displayName}</span>
-                          <button
-                            type="button"
-                            className="subitem-edit-icon-btn"
-                            title="Rename experiment"
-                            aria-label="Rename experiment"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleStartRename('experiment', expId, displayName);
-                            }}
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
 
           {/* Logs */}
           <div className="drawer-nav-group">

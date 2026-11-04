@@ -74,4 +74,11 @@ Always inspect and configure every parameter deliberately according to its speci
 [ ] Is the prompt clear and actionable without unnecessary search instructions?
 [ ] Are all nodes connected in an unbroken chain to Output with zero bypass threads?
 [ ] Does every agent have an upstream input and instructions?
-[ ] Has every custom engine passed test_engine?`;
+[ ] Has every custom engine passed test_engine?
+
+5. READ-ONLY LOG INSPECTION TOOLS (DIAGNOSE ERRORS & TRACE RUNS):
+- "get_workflow_logs": List recent workflow execution runs with their status, error, duration, and node count.
+- "inspect_workflow_run_log": Inspect the complete read-only trace of a workflow run (or the latest run). Shows:
+  * The exact execution path followed (which threads were activated).
+  * Every single node executed, its exact input received, output returned, duration, and error message.
+  * Call this whenever a pipeline fails, returns null, or behaves unexpectedly to diagnose the exact problem and fix it!`;

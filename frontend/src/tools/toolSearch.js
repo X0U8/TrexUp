@@ -1,7 +1,7 @@
 import { NODE_TOOL_DEFINITIONS } from './nodes';
 import { ENGINE_TOOL_DEFINITIONS } from './engine';
 import { WORKFLOW_TOOL_DEFINITIONS } from './workflowTools';
-import { EXPERIMENT_TOOL_DEFINITIONS } from './experiment';
+import { LOG_TOOL_DEFINITIONS } from './logs';
 
 /**
  * Builds Meta Tool Search compliant tool definitions.
@@ -12,7 +12,7 @@ export function buildMetaToolSearchPayload({
   includeCanvas = true,
   includeEngines = true,
   includeWorkflow = true,
-  includeExperiment = true,
+  includeLogs = true,
   customTools = [],
 } = {}) {
   const tools = [];
@@ -62,12 +62,12 @@ export function buildMetaToolSearchPayload({
     });
   }
 
-  if (includeExperiment) {
+  if (includeLogs) {
     tools.push({
       type: 'namespace',
-      name: 'experiment',
-      description: 'Autonomous experimentation tools for proposing hypotheses, establishing flowchart plans, updating steps, recording proof-backed findings, saving artifacts, and compiling reports.',
-      tools: EXPERIMENT_TOOL_DEFINITIONS.map((def) => ({
+      name: 'logs',
+      description: 'Read-only log inspection tools for retrieving execution logs, tracing pipeline flow paths, and inspecting individual node input and output data.',
+      tools: LOG_TOOL_DEFINITIONS.map((def) => ({
         type: 'function',
         name: def.name,
         description: def.description,
@@ -76,6 +76,8 @@ export function buildMetaToolSearchPayload({
       })),
     });
   }
+
+
 
   if (Array.isArray(customTools) && customTools.length > 0) {
     tools.push({

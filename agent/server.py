@@ -21,7 +21,7 @@ import tempfile
 import subprocess
 import shutil
 import uuid
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 
 HOST = "127.0.0.1"
 PORT = 8001
@@ -142,61 +142,139 @@ def persist_file_outputs(output, manifest):
             "local_path": stored_path,
             "url": f"http://{HOST}:{PORT}/storage/documents/{quote(stored_name)}",
         }
-def enrich_messages_with_local_images(messages):
+    return output
+
+
+def enrich_single_user_message(m):
     """
-    Scans messages for local image file paths or stored document URLs (png, webp, jpg, jpeg, gif, bmp),
-    reads the local image bytes from disk, base64 encodes them, and enriches the message content
-    into OpenAI multimodal vision format ({"type": "image_url", "image_url": {"url": data_url}})
-    so vision models (like muse-spark-1.3 and muse-wonder-1.0) can view them directly.
+    Enriches a single user message with local image vision inputs if local image file paths
+    or document storage paths are referenced.
     """
     import base64
     import mimetypes
     import re
 
-    new_messages = []
-    for msg in messages:
-        m = dict(msg)
-        content = m.get("content", "")
-        if isinstance(content, str):
-            # Extract absolute local paths or file:// paths
-            paths = re.findall(r'(?:file://)?(/[^\s"\'<>\(\)\[\]]+\.(?:webp|png|jpe?g|gif|bmp))', content, re.IGNORECASE)
+    raw_content = m.get("content")
+    if raw_content is None:
+        m["content"] = ""
+    elif not isinstance(raw_content, (str, list)):
+        m["content"] = str(raw_content)
 
-            # Extract local server storage URLs
-            url_matches = re.findall(r'https?://[^\s"\'<>]+/storage/documents/([^\s"\'<>\?#]+)', content, re.IGNORECASE)
-            for fname in url_matches:
-                from urllib.parse import unquote
-                clean_fname = unquote(fname)
-                cand = os.path.join(DOCS_STORAGE_DIR, clean_fname)
-                if cand not in paths and os.path.isfile(cand):
-                    paths.append(cand)
+    content = m["content"]
+    if isinstance(content, str):
+        # Extract absolute local paths or file:// paths
+        paths = re.findall(r'(?:file://)?(/[^\s"\'<>\(\)\[\]]+\.(?:webp|png|jpe?g|gif|bmp))', content, re.IGNORECASE)
 
-            # Extract any standalone image filename that exists in DOCS_STORAGE_DIR
-            fnames = re.findall(r'\b([a-zA-Z0-9_\-]+\.(?:webp|png|jpe?g|gif))\b', content, re.IGNORECASE)
-            for fn in fnames:
-                cand = os.path.join(DOCS_STORAGE_DIR, fn)
-                if cand not in paths and os.path.isfile(cand):
-                    paths.append(cand)
+        # Extract local server storage URLs
+        url_matches = re.findall(r'https?://[^\s"\'<>]+/storage/documents/([^\s"\'<>\?#]+)', content, re.IGNORECASE)
+        for fname in url_matches:
+            from urllib.parse import unquote
+            clean_fname = unquote(fname)
+            cand = os.path.join(DOCS_STORAGE_DIR, clean_fname)
+            if cand not in paths and os.path.isfile(cand):
+                paths.append(cand)
 
-            image_urls = []
-            for p in paths:
-                if os.path.isfile(p):
-                    mime, _ = mimetypes.guess_type(p)
-                    mime = mime or "image/webp"
-                    try:
-                        if os.path.getsize(p) <= 12 * 1024 * 1024:
-                            with open(p, "rb") as f:
-                                b64 = base64.b64encode(f.read()).decode("utf-8")
-                            image_urls.append(f"data:{mime};base64,{b64}")
-                    except Exception as err:
-                        print(f"[VisionEnrich] Error reading image {p}: {err}")
+        # Extract any standalone image filename that exists in DOCS_STORAGE_DIR
+        fnames = re.findall(r'\b([a-zA-Z0-9_\-]+\.(?:webp|png|jpe?g|gif))\b', content, re.IGNORECASE)
+        for fn in fnames:
+            cand = os.path.join(DOCS_STORAGE_DIR, fn)
+            if cand not in paths and os.path.isfile(cand):
+                paths.append(cand)
 
-            if image_urls:
-                m["content"] = [{"type": "text", "text": content}]
-                for u in image_urls:
-                    m["content"].append({"type": "image_url", "image_url": {"url": u}})
+        image_urls = []
+        for p in paths:
+            if os.path.isfile(p):
+                mime, _ = mimetypes.guess_type(p)
+                mime = mime or "image/webp"
+                try:
+                    if os.path.getsize(p) <= 12 * 1024 * 1024:
+                        with open(p, "rb") as f:
+                            b64 = base64.b64encode(f.read()).decode("utf-8")
+                        image_urls.append(f"data:{mime};base64,{b64}")
+                except Exception as err:
+                    print(f"[VisionEnrich] Error reading image {p}: {err}")
 
-        new_messages.append(m)
-    return new_messages
+        if image_urls:
+            m["content"] = [{"type": "text", "text": content}]
+            for u in image_urls:
+                m["content"].append({"type": "image_url", "image_url": {"url": u}})
+
+    return m
+
+
+def enrich_messages_with_local_images(messages):
+    """
+    Strictly normalizes OpenAI chat messages schema before passing to client.chat.completions.create:
+    - role='user': can be string or list of content blocks (enriched with vision if images detected)
+    - role='assistant': if tool_calls, content can be None or string (never list). If no tool_calls, must be string.
+    - role='tool': content MUST strictly be string. Must have tool_call_id.
+    - role='system': content MUST strictly be string.
+    """
+    clean_messages = []
+    for raw_m in (messages or []):
+        if not isinstance(raw_m, dict):
+            continue
+        m = dict(raw_m)
+        role = m.get("role", "user")
+
+        if role == "tool":
+            c = m.get("content")
+            if c is None:
+                m["content"] = "{}"
+            elif isinstance(c, (dict, list)):
+                m["content"] = json.dumps(c)
+            else:
+                m["content"] = str(c)
+            if not m.get("tool_call_id"):
+                m["tool_call_id"] = "call_default"
+            clean_messages.append({
+                "role": "tool",
+                "tool_call_id": str(m["tool_call_id"]),
+                "content": m["content"]
+            })
+            continue
+
+        if role == "assistant":
+            tool_calls = m.get("tool_calls")
+            c = m.get("content")
+            entry = {"role": "assistant"}
+            if tool_calls:
+                entry["tool_calls"] = tool_calls
+                if c is None or c == "":
+                    entry["content"] = None
+                elif isinstance(c, list):
+                    entry["content"] = " ".join(
+                        part.get("text", "") for part in c if isinstance(part, dict)
+                    )
+                else:
+                    entry["content"] = str(c)
+            else:
+                if c is None:
+                    entry["content"] = ""
+                elif isinstance(c, list):
+                    entry["content"] = " ".join(
+                        part.get("text", "") for part in c if isinstance(part, dict)
+                    )
+                else:
+                    entry["content"] = str(c)
+            clean_messages.append(entry)
+            continue
+
+        if role == "system":
+            c = m.get("content")
+            if c is None:
+                c = ""
+            elif isinstance(c, list):
+                c = " ".join(part.get("text", "") for part in c if isinstance(part, dict))
+            else:
+                c = str(c)
+            clean_messages.append({"role": "system", "content": c})
+            continue
+
+        # Default role == 'user'
+        clean_messages.append(enrich_single_user_message(m))
+
+    return clean_messages
 
 
 def resolve_local_document(input_data):
@@ -219,10 +297,11 @@ def resolve_local_document(input_data):
         or ""
     )
     file_name = (
-        doc_info.get("file_name")
-        or doc_info.get("name")
+        (doc_info.get("file_name") if isinstance(doc_info, dict) else None)
+        or (doc_info.get("name") if isinstance(doc_info, dict) else None)
         or input_data.get("file_name")
         or input_data.get("name")
+        or (input_data.get("document") if isinstance(input_data.get("document"), str) else "")
         or "unnamed"
     )
     b64_data = (
@@ -317,6 +396,7 @@ def resolve_local_document(input_data):
 
 FILES_REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "files_registry.json")
 _FILES_LOCK = threading.Lock()
+_MODEL_LOCK = threading.Lock()
 
 
 def get_or_upload_file_id(client, file_path):
@@ -570,6 +650,34 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 "storage_dir": DOCS_STORAGE_DIR,
             }
             self.wfile.write(json.dumps(response).encode("utf-8"))
+        elif self.path in ["/api/documents", "/api/documents/"]:
+            try:
+                import datetime
+                files = []
+                if os.path.isdir(DOCS_STORAGE_DIR):
+                    fnames = [fn for fn in os.listdir(DOCS_STORAGE_DIR) if not fn.startswith(".")]
+                    fnames.sort(key=lambda x: os.path.getmtime(os.path.join(DOCS_STORAGE_DIR, x)), reverse=True)
+                    for fname in fnames:
+                        fpath = os.path.join(DOCS_STORAGE_DIR, fname)
+                        if not os.path.isfile(fpath):
+                            continue
+                        mime, _ = mimetypes.guess_type(fpath)
+                        stat = os.stat(fpath)
+                        files.append({
+                            "filename": fname,
+                            "name": fname,
+                            "url": f"http://{HOST}:{PORT}/storage/documents/{urllib.parse.quote(fname)}",
+                            "local_path": fpath,
+                            "size_bytes": stat.st_size,
+                            "fileSize": stat.st_size,
+                            "mime_type": mime or "application/octet-stream",
+                            "modified_at": datetime.datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        })
+                self._set_cors_headers(200)
+                self.wfile.write(json.dumps({"status": "success", "documents": files}).encode("utf-8"))
+            except Exception as e:
+                self._set_cors_headers(500)
+                self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
         elif self.path.startswith("/storage/documents/") or self.path.startswith("/files/"):
             rel_name = self.path.split("/", 3)[-1]
             rel_name = urllib.parse.unquote(rel_name.split("?")[0])
@@ -1059,7 +1167,8 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                         # Note: parallel_tool_calls is not sent; Meta models default to parallel and some don't accept this param
 
                     print(f"[{time.strftime('%X')}] responses.create called with {len(resp_kwargs.get('tools', []))} tools")
-                    response = client.responses.create(**resp_kwargs)
+                    with _MODEL_LOCK:
+                        response = client.responses.create(**resp_kwargs)
 
                     text_parts = []
                     output_items = getattr(response, "output", []) or []
@@ -1105,7 +1214,8 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                         except Exception:
                             pass
                     try:
-                        response = client.chat.completions.create(**call_kwargs)
+                        with _MODEL_LOCK:
+                            response = client.chat.completions.create(**call_kwargs)
                         choice = response.choices[0]
                         out_content = choice.message.content or ""
                         tc_list = getattr(choice.message, "tool_calls", None) or []
@@ -1207,7 +1317,8 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 if reasoning:
                     call_kwargs["reasoning_effort"] = reasoning
 
-                response = client.chat.completions.create(**call_kwargs)
+                with _MODEL_LOCK:
+                    response = client.chat.completions.create(**call_kwargs)
 
                 choices_data = []
                 for c in getattr(response, "choices", []):
@@ -1326,6 +1437,138 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._set_cors_headers(200)
                 self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
+        elif self.path == "/api/web/search":
+            start_time = time.perf_counter()
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body_bytes = self.rfile.read(content_length)
+                data = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+
+                query = data.get("query", "").strip()
+                if not query:
+                    raise ValueError("Search query is required.")
+
+                search_context_size = data.get("search_context_size", "medium")
+                if search_context_size not in ["low", "medium", "high"]:
+                    search_context_size = "medium"
+
+                model_name = data.get("model", "muse-spark-1.3")
+                client = get_meta_client()
+                if client is None:
+                    raise RuntimeError("Meta client is not configured. Ensure MODEL_API_KEY is set.")
+
+                with _MODEL_LOCK:
+                    res = client.responses.create(
+                        model=model_name,
+                        input=query,
+                        tools=[{"type": "web_search", "search_context_size": search_context_size}],
+                    )
+
+                citations = []
+                searched = any(getattr(item, "type", "") == "web_search_call" for item in getattr(res, "output", []))
+                seen_urls = set()
+
+                for item in getattr(res, "output", []):
+                    if getattr(item, "type", "") != "message":
+                        continue
+                    for block in getattr(item, "content", []):
+                        if getattr(block, "type", "") != "output_text":
+                            continue
+                        text = getattr(block, "text", "")
+                        for ann in (getattr(block, "annotations", []) or []):
+                            if getattr(ann, "type", "") == "url_citation":
+                                url = getattr(ann, "url", "")
+                                if url and url not in seen_urls:
+                                    seen_urls.add(url)
+                                    s_idx = getattr(ann, "start_index", 0)
+                                    e_idx = getattr(ann, "end_index", len(text))
+                                    passage = text[s_idx:e_idx] if 0 <= s_idx <= e_idx <= len(text) else ""
+                                    citations.append({
+                                        "title": getattr(ann, "title", "Web Source"),
+                                        "url": url,
+                                        "passage": passage.strip(),
+                                    })
+
+                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                self._set_cors_headers(200)
+                self.wfile.write(json.dumps({
+                    "status": "success",
+                    "query": query,
+                    "answer": getattr(res, "output_text", ""),
+                    "searched": searched,
+                    "citations": citations,
+                    "duration_ms": duration_ms,
+                }).encode("utf-8"))
+                print(f"[{time.strftime('%X')}] Web search '{query[:40]}' -> {len(citations)} citations ({duration_ms}ms)")
+            except Exception as e:
+                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                err_msg = str(e)
+                self._set_cors_headers(500)
+                self.wfile.write(json.dumps({
+                    "status": "error",
+                    "error": err_msg,
+                    "duration_ms": duration_ms,
+                }).encode("utf-8"))
+                print(f"[{time.strftime('%X')}] Web search error ({duration_ms}ms): {err_msg}")
+
+        elif self.path == "/api/web/download":
+            start_time = time.perf_counter()
+            try:
+                import urllib.request
+                from urllib.parse import urlparse, unquote
+
+                content_length = int(self.headers.get("Content-Length", 0))
+                body_bytes = self.rfile.read(content_length)
+                data = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+
+                url = data.get("url", "").strip()
+                if not url or not (url.startswith("http://") or url.startswith("https://")):
+                    raise ValueError("A valid HTTP/HTTPS URL is required.")
+
+                parsed = urlparse(url)
+                suggested_name = data.get("filename", "").strip()
+                if not suggested_name:
+                    path_name = os.path.basename(unquote(parsed.path))
+                    suggested_name = path_name if path_name and "." in path_name else f"download_{int(time.time())}.bin"
+
+                clean_name = re.sub(r'[^\w\.\-\_]', '_', suggested_name)
+                final_name = f"web_{int(time.time())}_{clean_name}"
+                dest_path = os.path.join(DOCS_STORAGE_DIR, final_name)
+
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                })
+
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    with open(dest_path, "wb") as out_f:
+                        shutil.copyfileobj(resp, out_f)
+
+                mime, _ = mimetypes.guess_type(dest_path)
+                size_bytes = os.path.getsize(dest_path)
+                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+                self._set_cors_headers(200)
+                self.wfile.write(json.dumps({
+                    "status": "success",
+                    "filename": clean_name,
+                    "stored_filename": final_name,
+                    "local_path": dest_path,
+                    "url": f"http://{HOST}:{PORT}/storage/documents/{final_name}",
+                    "mime_type": mime or "application/octet-stream",
+                    "size_bytes": size_bytes,
+                    "duration_ms": duration_ms,
+                }).encode("utf-8"))
+                print(f"[{time.strftime('%X')}] Downloaded web file '{clean_name}' ({size_bytes} bytes, {duration_ms}ms)")
+            except Exception as e:
+                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                err_msg = str(e)
+                self._set_cors_headers(500)
+                self.wfile.write(json.dumps({
+                    "status": "error",
+                    "error": err_msg,
+                    "duration_ms": duration_ms,
+                }).encode("utf-8"))
+                print(f"[{time.strftime('%X')}] Web download error ({duration_ms}ms): {err_msg}")
         else:
             self._set_cors_headers(404)
             self.wfile.write(json.dumps({"error": "Unknown POST route"}).encode("utf-8"))
@@ -1336,7 +1579,7 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
 
 def run_server():
     server_address = (HOST, PORT)
-    httpd = HTTPServer(server_address, EngineRequestHandler)
+    httpd = ThreadingHTTPServer(server_address, EngineRequestHandler)
     print(f"Trex Engine Server running on http://{HOST}:{PORT}")
     try:
         httpd.serve_forever()

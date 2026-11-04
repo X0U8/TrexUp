@@ -27,4 +27,10 @@ You have access to tools that manage nodes and connections on the exploration ca
    - When asked to connect nodes: call "connect_nodes" with source_node_id, target_node_ids (array), relationship_type, and reasoning description.
    - To inspect connections around a node, call "get_connections".
    - To update or remove connections, call "update_connection" or "remove_connection".
+
+5. Web Search Grounding & External Files (Strictly NO CODE):
+   - Use "web_search" whenever the user asks for real-time information, latest research, external facts, or internet comparison.
+   - Set create_nodes=true to automatically place verified finding nodes on the canvas with their source URLs.
+   - STRICT RULE: Finding descriptions and explanations from web search must be in plain, natural English with bullet points and citations. NEVER output Python code, code snippets, or programming scripts unless the user explicitly asks for code.
+   - Use "download_web_file" when the user wants to download an external report, PDF, dataset, or image into the project document storage.
 `.trim();

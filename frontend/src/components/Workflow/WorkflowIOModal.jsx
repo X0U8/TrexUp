@@ -152,41 +152,50 @@ export default function WorkflowIOModal({ isOpen, node, workflowName, onClose, o
             </div>
           )}
 
-          {/* Accepted Input Formats: Files & Canvas Nodes */}
-          <div className="wf-io-section">
-            <span className="wf-io-label">Accepted Inputs</span>
-            <p className="wf-io-desc">Select which inputs this workflow can process.</p>
-            <div className="wf-io-grid-2col">
-              {INPUT_DATA_TYPES.map((t) => {
-                const isSelected = acceptedTypes.includes(t.id);
-                return (
-                  <div
-                    key={t.id}
-                    className={`wf-io-option ${isSelected ? 'active' : ''}`}
-                    onClick={() => toggleAcceptedType(t.id)}
-                  >
-                    <div className="wf-io-check-box">
-                      {isSelected && (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      )}
-                    </div>
-                    <div className="wf-io-option-info">
-                      <span className="wf-io-opt-name">{t.label}</span>
-                      <span className="wf-io-opt-exts">{t.exts}</span>
-                    </div>
-                  </div>
-                );
-              })}
+          {/* Accepted Input Formats: Files & Canvas Nodes (Input node only) */}
+          {node.type === 'output' ? (
+            <div className="wf-io-section">
+              <span className="wf-io-label">Output Delivery</span>
+              <p className="wf-io-desc">Results from upstream workflow stages are synthesized and committed to the exploration canvas.</p>
             </div>
-          </div>
+          ) : (
+            <div className="wf-io-section">
+              <span className="wf-io-label">Accepted Inputs</span>
+              <p className="wf-io-desc">Select which inputs this workflow can process.</p>
+              <div className="wf-io-grid-2col">
+                {INPUT_DATA_TYPES.map((t) => {
+                  const isSelected = acceptedTypes.includes(t.id);
+                  return (
+                    <div
+                      key={t.id}
+                      className={`wf-io-option ${isSelected ? 'active' : ''}`}
+                      onClick={() => toggleAcceptedType(t.id)}
+                    >
+                      <div className="wf-io-check-box">
+                        {isSelected && (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="wf-io-option-info">
+                        <span className="wf-io-opt-name">{t.label}</span>
+                        <span className="wf-io-opt-exts">{t.exts}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Modal Footer */}
         <div className="wf-io-footer">
           <span className="wf-io-footer-summary">
-            Trigger: {activeTriggerObj.label} • {acceptedTypes.length} accepted input{acceptedTypes.length === 1 ? '' : 's'}
+            {node.type === 'output'
+              ? 'Results commit to exploration canvas upon completion'
+              : `Trigger: ${activeTriggerObj.label} • ${acceptedTypes.length} accepted input${acceptedTypes.length === 1 ? '' : 's'}`}
           </span>
           <button type="button" className="wf-io-done-btn" onClick={onClose}>
             Done
