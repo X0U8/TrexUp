@@ -2835,8 +2835,6 @@ def run(input_data, context=None):
           src="/logo.jpg"
           alt="Trex"
           className="top-nav-logo"
-          onClick={handleGoToProjects}
-          title="Trex"
         />
         <Sidebar
           onGoToProjects={handleGoToProjects}

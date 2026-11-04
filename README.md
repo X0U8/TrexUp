@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./assets/logo.jpg" alt="Trex Logo" width="128" style="border-radius: 50%;" />
   <h1>Trex</h1>
-  <p>A visual canvas and workspace for AI-powered exploration, workflow orchestration, and document analysis.</p>
+ 
 </div>
 
 ---

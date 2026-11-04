@@ -194,13 +194,11 @@ export default function ProjectsPage({ onSelectProject }) {
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth="1.9"
+                      strokeWidth="1.6"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >
-                      <path d="M 9.5 5.5 h 5" />
-                      <path d="M 7 9 h 10" />
-                      <path d="M 6.5 12.5 h 11 l -1.2 6.5 c -0.2 1 -1.1 1.8 -2.1 1.8 h -4.4 c -1 0 -1.9 -0.8 -2.1 -1.8 Z" />
+                      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
                     </svg>
                   )}
                 </div>
@@ -297,24 +295,16 @@ export default function ProjectsPage({ onSelectProject }) {
           {/* Line-art Illustration */}
           <div className="empty-state-icon" aria-hidden="true">
             <svg
-              viewBox="0 0 100 100"
+              viewBox="0 0 64 64"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2.2"
+              strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <rect x="28" y="16" width="18" height="18" rx="3.5" />
-              <rect x="50" y="16" width="18" height="18" rx="3.5" />
-              <rect x="28" y="40" width="18" height="18" rx="3.5" />
-              <rect x="54" y="37" width="18" height="18" rx="3.5" />
-              <path
-                style={{ fill: 'var(--icon-bg, white)' }}
-                d="M 41.9 70.3 A 2.5 2.5 0 0 1 46.1 67.7 L 53 73.8 V 52.5 A 2.5 2.5 0 0 1 58 52.5 V 50.5 A 2.5 2.5 0 0 1 63 50.5 V 52.5 A 2.5 2.5 0 0 1 68 52.5 V 55.5 A 2.5 2.5 0 0 1 73 55.5 V 78 C 73 85 68 89 63 89 C 57 89 52 87 49.9 83.3 Z"
-              />
-              <path d="M 58 52.5 V 68" />
-              <path d="M 63 52.5 V 68" />
-              <path d="M 68 55.5 V 68" />
+              <path d="M54 52a4 4 0 0 0 4-4V20a4 4 0 0 0-4-4H34l-5-6H10a4 4 0 0 0-4 4v34a4 4 0 0 0 4 4Z" />
+              <line x1="32" y1="28" x2="32" y2="44" />
+              <line x1="24" y1="36" x2="40" y2="36" />
             </svg>
           </div>
 
