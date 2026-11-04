@@ -14,6 +14,7 @@ import zipfile
 import urllib
 import urllib.request
 import urllib.error
+import urllib.parse
 import hashlib
 import threading
 import traceback
@@ -117,9 +118,6 @@ def get_meta_client():
 def persist_file_outputs(output, manifest):
     """An engine that declares a 'file' output may write it anywhere (often /tmp). Copy it into the
     project's document storage so it survives, and return it as a file with a URL for preview/download."""
-    import shutil
-    from urllib.parse import quote
-
     if not isinstance(output, dict) or not isinstance(manifest, dict):
         return output
     for port, spec in (manifest.get("outputs") or {}).items():
@@ -140,7 +138,7 @@ def persist_file_outputs(output, manifest):
             "filename": base,
             "mime_type": mime or "application/octet-stream",
             "local_path": stored_path,
-            "url": f"http://{HOST}:{PORT}/storage/documents/{quote(stored_name)}",
+            "url": f"http://{HOST}:{PORT}/storage/documents/{urllib.parse.quote(stored_name)}",
         }
     return output
 
@@ -168,8 +166,7 @@ def enrich_single_user_message(m):
         # Extract local server storage URLs
         url_matches = re.findall(r'https?://[^\s"\'<>]+/storage/documents/([^\s"\'<>\?#]+)', content, re.IGNORECASE)
         for fname in url_matches:
-            from urllib.parse import unquote
-            clean_fname = unquote(fname)
+            clean_fname = urllib.parse.unquote(fname)
             cand = os.path.join(DOCS_STORAGE_DIR, clean_fname)
             if cand not in paths and os.path.isfile(cand):
                 paths.append(cand)
@@ -351,7 +348,6 @@ def resolve_local_document(input_data):
                 print(f"[Storage] Failed to decode base64: {e}")
         elif download_url and download_url.startswith(("http://", "https://")):
             try:
-                import urllib.request
                 print(f"[Storage] First-run: downloading {file_name} (doc_id={doc_id}) from {download_url}...")
                 req = urllib.request.Request(download_url, headers={"User-Agent": "Trex-Engine-Runner/1.0"})
                 with urllib.request.urlopen(req, timeout=20) as resp:
@@ -1514,9 +1510,6 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
         elif self.path == "/api/web/download":
             start_time = time.perf_counter()
             try:
-                import urllib.request
-                from urllib.parse import urlparse, unquote
-
                 content_length = int(self.headers.get("Content-Length", 0))
                 body_bytes = self.rfile.read(content_length)
                 data = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
@@ -1525,10 +1518,10 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 if not url or not (url.startswith("http://") or url.startswith("https://")):
                     raise ValueError("A valid HTTP/HTTPS URL is required.")
 
-                parsed = urlparse(url)
+                parsed = urllib.parse.urlparse(url)
                 suggested_name = data.get("filename", "").strip()
                 if not suggested_name:
-                    path_name = os.path.basename(unquote(parsed.path))
+                    path_name = os.path.basename(urllib.parse.unquote(parsed.path))
                     suggested_name = path_name if path_name and "." in path_name else f"download_{int(time.time())}.bin"
 
                 clean_name = re.sub(r'[^\w\.\-\_]', '_', suggested_name)
