@@ -156,11 +156,11 @@
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 10px;
-  height: 10px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: #ffffff;
-  border: 2px solid #64748b;
+  border: 1px solid #64748b;
   cursor: crosshair;
   z-index: 15;
   transition: all 0.15s ease;
@@ -170,23 +170,23 @@
 .wf-port::before {
   content: '';
   position: absolute;
-  inset: -8px;
+  inset: -10px;
   border-radius: 50%;
 }
 
 .wf-port:hover {
-  transform: translateY(-50%) scale(1.4);
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.7);
+  transform: translateY(-50%) scale(1.35);
+  box-shadow: 0 0 5px rgba(59, 130, 246, 0.6);
   border-color: #3b82f6;
   background: #eff6ff;
 }
 
 .wf-port.port-left {
-  left: -5px;
+  left: -2.5px;
 }
 
 .wf-port.port-right {
-  right: -5px;
+  right: -2.5px;
 }
 
 .workflow-node.input .wf-port {

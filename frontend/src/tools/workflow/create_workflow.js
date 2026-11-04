@@ -60,8 +60,8 @@ export async function run(ctx, args) {
       y: 220,
       width: 175,
       height: 56,
-      acceptedTypes: ['documents', 'text', 'images', 'audio', 'data'],
-      sourceScope: 'uploaded_documents',
+      acceptedTypes: ['canvas_nodes', 'files'],
+      sourceScope: 'canvas_nodes',
     },
     output: {
       id: 'output',

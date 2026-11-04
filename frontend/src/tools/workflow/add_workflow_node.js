@@ -63,8 +63,8 @@ export async function run(ctx, args) {
     newNode.inputSource = 'previous';
   } else if (type === 'input') {
     newNode.trigger = 'manual';
-    newNode.acceptedTypes = ['documents', 'text', 'images', 'audio', 'data'];
-    newNode.sourceScope = 'uploaded_documents';
+    newNode.acceptedTypes = ['canvas_nodes', 'files'];
+    newNode.sourceScope = 'canvas_nodes';
   } else if (type === 'output') {
     newNode.inputSource = 'previous';
   }

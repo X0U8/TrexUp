@@ -33,17 +33,7 @@ const AVAILABLE_MODELS = [
     inPrice: 'In: $0.10 ($0.002 cache)',
     outPrice: 'Out: $0.20',
   },
-  {
-    id: 'sam-3.1',
-    name: 'SAM 3.1',
-    tag: 'Segment',
-    desc: 'Detect, segment, and track objects from text prompt across image and video.',
-    inputs: ['text', 'image', 'video'],
-    outputs: ['coordinates'],
-    inPrice: 'In: $2.50 / 1k images',
-    outPrice: 'Out: $0.20 / 1k frames (min 50 frames)',
-  },
-  {
+    {
     id: 'muse-voice-transcribe',
     name: 'Muse Voice Transcribe',
     tag: 'Audio',

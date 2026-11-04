@@ -1,6 +1,7 @@
 import { NODE_TOOL_DEFINITIONS } from './nodes';
 import { ENGINE_TOOL_DEFINITIONS } from './engine';
 import { WORKFLOW_TOOL_DEFINITIONS } from './workflowTools';
+import { EXPERIMENT_TOOL_DEFINITIONS } from './experiment';
 
 /**
  * Builds Meta Tool Search compliant tool definitions.
@@ -11,6 +12,7 @@ export function buildMetaToolSearchPayload({
   includeCanvas = true,
   includeEngines = true,
   includeWorkflow = true,
+  includeExperiment = true,
   customTools = [],
 } = {}) {
   const tools = [];
@@ -51,6 +53,21 @@ export function buildMetaToolSearchPayload({
       name: 'workflow',
       description: 'Workflow pipeline tools for creating flows, placing nodes, configuring agent intelligence, binding engines, routing threads, and execution inspection.',
       tools: WORKFLOW_TOOL_DEFINITIONS.map((def) => ({
+        type: 'function',
+        name: def.name,
+        description: def.description,
+        defer_loading: true,
+        parameters: def.parameters,
+      })),
+    });
+  }
+
+  if (includeExperiment) {
+    tools.push({
+      type: 'namespace',
+      name: 'experiment',
+      description: 'Autonomous experimentation tools for proposing hypotheses, establishing flowchart plans, updating steps, recording proof-backed findings, saving artifacts, and compiling reports.',
+      tools: EXPERIMENT_TOOL_DEFINITIONS.map((def) => ({
         type: 'function',
         name: def.name,
         description: def.description,

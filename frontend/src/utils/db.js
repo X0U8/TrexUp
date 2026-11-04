@@ -1,10 +1,15 @@
+import { refreshSynthesisPrompts } from './workflowTemplates';
 const DB_NAME = 'TrexUpDB';
 const DB_VERSION = 2;
 const STORE_NAME = 'projects';
 const CHAT_STORE_NAME = 'global_chat';
 
+// One shared connection for the whole app (opening a new one per call wastes connections).
+let dbPromise = null;
+
 function openDB() {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = (e) => {
@@ -17,21 +22,77 @@ function openDB() {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null;
+      };
+      resolve(db);
+    };
+    request.onerror = () => {
+      dbPromise = null;
+      reject(request.error);
+    };
   });
+  return dbPromise;
 }
 
-export async function saveProject(project) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    const req = store.put(project);
+// Saves run one after another, so an older snapshot can never finish after a newer one.
+let saveQueue = Promise.resolve();
 
-    req.onsuccess = () => resolve(project);
-    req.onerror = () => reject(req.error);
+/**
+ * Saves a project. Resolves only when IndexedDB has committed the write, so a reload right after
+ * a change does not lose it.
+ */
+export function saveProject(project) {
+  const run = saveQueue.then(async () => {
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).put(project);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('save aborted'));
+    });
+    return project;
   });
+  saveQueue = run.catch(() => {});
+  return run;
+}
+
+/**
+ * Work that was in progress when the page was closed cannot resume, so mark it as interrupted
+ * instead of leaving nodes spinning and runs marked as running forever.
+ */
+function recoverInterruptedState(project) {
+  if (!project) return project;
+  const fixNodes = (nodes = {}) => {
+    const out = {};
+    for (const [id, n] of Object.entries(nodes)) {
+      const stuck = n?.extracting || n?.status === 'extracting' || n?.status === 'running';
+      out[id] = stuck ? { ...n, extracting: false, status: 'interrupted' } : n;
+    }
+    return out;
+  };
+  const explorationsData = {};
+  for (const [expId, exp] of Object.entries(project.explorationsData || {})) {
+    const connections = {};
+    for (const [cid, c] of Object.entries(exp?.connections || {})) {
+      connections[cid] =
+        c?.kind === 'workflow_run' && c.status === 'running' ? { ...c, status: 'interrupted' } : c;
+    }
+    explorationsData[expId] = { ...exp, nodes: fixNodes(exp?.nodes), connections };
+  }
+  const workflowLogs = (project.workflowLogs || []).map((r) =>
+    r?.status === 'running' ? { ...r, status: 'interrupted' } : r
+  );
+  return {
+    ...project,
+    nodes: project.nodes ? fixNodes(project.nodes) : project.nodes,
+    explorationsData: project.explorationsData ? explorationsData : project.explorationsData,
+    workflowLogs,
+  };
 }
 
 export async function getAllProjects() {
@@ -121,7 +182,7 @@ export async function getProject(id) {
     const store = tx.objectStore(STORE_NAME);
     const req = store.get(id);
 
-    req.onsuccess = () => resolve(req.result || null);
+    req.onsuccess = () => resolve(req.result ? recoverInterruptedState(refreshSynthesisPrompts(req.result)) : null);
     req.onerror = () => reject(req.error);
   });
 }

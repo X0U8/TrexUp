@@ -97,6 +97,10 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10.5px;
   color: #94a3b8;
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  line-height: 1.4;
 }
 
 .exp-thread-modal-close {
@@ -294,6 +298,43 @@
   transition: all 0.15s ease;
 }
 
+.exp-thread-status-box.workflow {
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+}
+
+.exp-thread-dot.workflow {
+  background: #8b5cf6;
+}
+
+.exp-thread-status-box.workflow .exp-thread-status-name {
+  color: #5b21b6;
+}
+
+.exp-thread-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.exp-thread-btn-logs {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.exp-thread-btn-logs:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
 .exp-thread-btn-delete:hover {
   background: #fef2f2;
   border-color: #fca5a5;
@@ -316,3 +357,5 @@
 .exp-thread-btn-done:hover {
   opacity: 0.88;
 }
+
+

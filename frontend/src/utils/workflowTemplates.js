@@ -106,7 +106,7 @@ export const DEFAULT_EXTRACTION_WORKFLOW = {
         previousMetadata: true,
       },
       systemPrompt:
-        'You are the Knowledge Synthesis Agent.\n\nRULES:\n- Never answer with plain text only. You MUST call tools to perform your work.\n- Extract primary conceptual topics, essential subtopics, and crucial findings from the document.\n- Call "create_nodes" to create them on the exploration canvas in batch, connecting topics to the source document and subtopics directly to their parent topic nodes.',
+        'You are the Knowledge Synthesis Agent.\n\nRULES:\n- Work from the upstream text you were given. Do not search the canvas for inputs that are missing; if something is missing, say so in your reply.\n- Extract primary conceptual topics, essential subtopics, and crucial findings from the document.\n- Call "canvas_outline" once first to see what already exists on the canvas.\n- Call "create_nodes" to create what is missing in batch, connecting topics to the source document and subtopics directly to their parent topic nodes. Every node you create MUST be connected: set connect_to_source_id on each node (the Node ID of the source document, given in the canvas directive for topics, findings and claims; the node_id of the parent topic for subtopics). A node without connect_to_source_id is an error. Do not recreate nodes already in the outline.\n- After you create nodes, call "canvas_outline" once to confirm. If it shows the source, topics, findings and evidence connected with no problems, you are DONE: reply with a short summary and call no tools.',
       temperature: 0.2,
       reasoningEffort: 'minimal',
       x: 1250,
@@ -210,3 +210,30 @@ export const DEFAULT_WORKFLOWS = {
   extraction: DEFAULT_EXTRACTION_WORKFLOW,
   connection_synthesis: DEFAULT_CONNECTION_WORKFLOW,
 };
+
+/**
+ * Projects saved before a prompt fix keep their old copy of the Synthesis agent prompt.
+ * On load, replace only that known old prompt (it starts with the same line and lacks the
+ * current connect rule). Prompts the user wrote differently are left alone.
+ */
+export function refreshSynthesisPrompts(project) {
+  if (!project?.workflowsData) return project;
+  const latest = DEFAULT_WORKFLOWS.extraction.nodes.agent_3.systemPrompt;
+  const OLD_START = 'You are the Knowledge Synthesis Agent.';
+  const CURRENT_RULE = 'MUST be connected';
+
+  const workflowsData = {};
+  for (const [wfId, wf] of Object.entries(project.workflowsData)) {
+    const nodes = {};
+    for (const [nId, n] of Object.entries(wf?.nodes || {})) {
+      const isOldSynthesis =
+        n?.type === 'agent' &&
+        typeof n.systemPrompt === 'string' &&
+        n.systemPrompt.startsWith(OLD_START) &&
+        !n.systemPrompt.includes(CURRENT_RULE);
+      nodes[nId] = isOldSynthesis ? { ...n, systemPrompt: latest } : n;
+    }
+    workflowsData[wfId] = wf ? { ...wf, nodes } : wf;
+  }
+  return { ...project, workflowsData };
+}

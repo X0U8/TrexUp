@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { NODE_LIFECYCLE_DEFINITIONS, NODE_INSTRUCTIONS } from '../../tools/nodeLifecycleTools';
 import { ENGINE_TOOL_DEFINITIONS, ENGINE_INSTRUCTIONS } from '../../tools/engine';
 import { WORKFLOW_TOOL_DEFINITIONS, WORKFLOW_INSTRUCTIONS } from '../../tools/workflowTools';
+import { EXPERIMENT_TOOL_DEFINITIONS, EXPERIMENT_INSTRUCTIONS } from '../../tools/experiment';
 import { getGlobalChat, saveGlobalChat, clearGlobalChat } from '../../utils/db';
 import MarkdownText from './MarkdownText';
 import './ModelChatPanel.css';
@@ -11,6 +12,8 @@ const FIXED_MODEL_NAME = 'Muse Spark 1.3';
 
 export default function ModelChatPanel({
   currentExploration = 'exploration_01',
+  currentExperiment = 'experiment_01',
+  experimentData = {},
   nodes = {},
   onExecuteTool,
   focusedNode = null,
@@ -55,6 +58,18 @@ export default function ModelChatPanel({
 
   const isLoadedRef = useRef(false);
   const messagesEndRef = useRef(null);
+  const messagesBoxRef = useRef(null);
+  const [visibleCount, setVisibleCount] = useState(30);
+  const visibleMessages = messages.length > visibleCount ? messages.slice(-visibleCount) : messages;
+
+  const loadEarlierMessages = () => {
+    const box = messagesBoxRef.current;
+    const previousHeight = box ? box.scrollHeight : 0;
+    setVisibleCount((c) => c + 30);
+    requestAnimationFrame(() => {
+      if (box) box.scrollTop += box.scrollHeight - previousHeight;
+    });
+  };
 
   // Load persisted global chat, size, and position from IndexedDB on mount
   useEffect(() => {
@@ -243,10 +258,10 @@ export default function ModelChatPanel({
       text,
       focusedNode: focusedNode
         ? {
-            id: focusedNode.id || focusedNode.node_id,
-            title: (focusedNode.title || focusedNode.name || 'Untitled').replace(/\.node$/i, ''),
-            type: (focusedNode.type || focusedNode.category || 'node').replace(/_/g, ' '),
-          }
+          id: focusedNode.id || focusedNode.node_id,
+          title: (focusedNode.title || focusedNode.name || 'Untitled').replace(/\.node$/i, ''),
+          type: (focusedNode.type || focusedNode.category || 'node').replace(/_/g, ' '),
+        }
         : null,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
@@ -256,11 +271,13 @@ export default function ModelChatPanel({
     setIsLoading(true);
     setActiveToolStatus('Connecting to model...');
 
+    let touchedWorkflowId = null; // declared outside try: the finally block reads it
     try {
       const apiTools = [
         ...NODE_LIFECYCLE_DEFINITIONS,
         ...ENGINE_TOOL_DEFINITIONS,
         ...WORKFLOW_TOOL_DEFINITIONS,
+        ...EXPERIMENT_TOOL_DEFINITIONS,
       ].map((tool) => ({
         type: 'function',
         function: {
@@ -290,22 +307,31 @@ export default function ModelChatPanel({
         });
 
       const systemPrompt = `You are Trex Assistant, the autonomous scientific research & workspace investigation assistant.
-You operate globally across the entire project, all scientific explorations, and workflow execution pipelines.
+You operate globally across the entire project, all scientific explorations, workflows, and autonomous experiments.
 The active exploration canvas in focus is "${currentExploration}".
+The active experiment is "${currentExperiment}".
 When creating, searching, or mutating exploration nodes, provide exploration_id as "${currentExploration}" unless the user explicitly refers to another exploration.
-You can investigate across explorations, connect findings, formulate hypotheses, synthesize evidence, and configure, place, connect, and execute workflow pipelines across the entire workspace.
+You can investigate across explorations, connect findings, formulate hypotheses, synthesize evidence, and plan and execute empirical experiments across the entire workspace.
+You have full multimodal vision capabilities. Any image files or diagrams attached to focused canvas nodes or referenced in paths are automatically loaded and provided directly to you as vision inputs, so you can inspect, describe, and analyze them in detail.
 
 ${NODE_INSTRUCTIONS}
 
 ${ENGINE_INSTRUCTIONS}
 
-${WORKFLOW_INSTRUCTIONS}`;
+${WORKFLOW_INSTRUCTIONS}
+
+${EXPERIMENT_INSTRUCTIONS}`;
 
       const activeNodeContext = focusedNode
-        ? `\n\n[Active Focused Canvas Node: ID="${focusedNode.id || focusedNode.node_id}", Title="${(focusedNode.title || focusedNode.name || '').replace(/\.node$/i, '')}", Type="${focusedNode.type || focusedNode.category || 'node'}", Status="${focusedNode.status || ''}", Description="${focusedNode.description || focusedNode.summary || focusedNode.content || ''}"]`
+        ? `\n\n[Active Focused Canvas Node: ID="${focusedNode.id || focusedNode.node_id}", Title="${(focusedNode.title || focusedNode.name || '').replace(/\.node$/i, '')}", Type="${focusedNode.type || focusedNode.category || 'node'}", Status="${focusedNode.status || ''}", Path="${focusedNode.local_path || focusedNode.filePath || focusedNode.path || focusedNode.url || focusedNode.cloudinaryUrl || ''}", Description="${focusedNode.description || focusedNode.summary || focusedNode.content || ''}"]`
         : '';
 
-      const userPromptWithContext = activeNodeContext ? `${text}${activeNodeContext}` : text;
+      const activeExperimentContext = currentExperiment && experimentData?.title
+        ? `\n\n[Active Experiment: ID="${currentExperiment}", Title="${experimentData.title}", Status="${experimentData.status || 'active'}", Steps=${Array.isArray(experimentData.plan) ? experimentData.plan.length : 0}, Findings=${Array.isArray(experimentData.findings) ? experimentData.findings.length : 0}]`
+        : '';
+
+      const promptContext = `${activeNodeContext}${activeExperimentContext}`;
+      const userPromptWithContext = promptContext ? `${text}${promptContext}` : text;
 
       let conversationMessages = [
         { role: 'system', content: systemPrompt },
@@ -316,7 +342,6 @@ ${WORKFLOW_INSTRUCTIONS}`;
       const toolEvents = [];
       let finalReply = '';
       let iteration = 0;
-      let touchedWorkflowId = null;
       let validationAttempts = 0;
       const MAX_ITERATIONS = 8;
 
@@ -623,6 +648,14 @@ ${WORKFLOW_INSTRUCTIONS}`;
         }
       }
 
+      // If a workflow was touched and still fails the checklist, say so instead of reporting success.
+      if (touchedWorkflowId) {
+        const finalCheck = await onExecuteTool?.('validate_workflow', { workflow_id: touchedWorkflowId });
+        if (finalCheck?.valid === false && Array.isArray(finalCheck.problems) && finalCheck.problems.length > 0) {
+          finalReply = `${finalReply}\n\nIncomplete: ${finalCheck.problems.join(' ')}`.trim();
+        }
+      }
+
       // If tool pills exist, clean redundant raw text
       let cleanedText = finalReply;
       if (toolEvents.length > 0) {
@@ -698,7 +731,6 @@ ${WORKFLOW_INSTRUCTIONS}`;
       >
         <div className="agent-header-identity">
           <span className="agent-header-name">Trex Assistant</span>
-          <span className="agent-fixed-model-tag">{FIXED_MODEL_NAME}</span>
         </div>
 
         <div className="model-chat-header-actions">
@@ -769,8 +801,13 @@ ${WORKFLOW_INSTRUCTIONS}`;
       {/* Body: messages and input */}
       {!isCollapsed && (
         <>
-          <div className="model-chat-messages">
-            {messages.map((msg) => (
+          <div className="model-chat-messages" ref={messagesBoxRef}>
+            {messages.length > visibleCount && (
+              <button type="button" className="chat-load-earlier" onClick={loadEarlierMessages}>
+                Load earlier messages ({messages.length - visibleCount} more)
+              </button>
+            )}
+            {visibleMessages.map((msg) => (
               <div
                 key={msg.id}
                 className={`chat-bubble-row ${msg.sender === 'user' ? 'user' : 'model'}`}
@@ -867,8 +904,8 @@ ${WORKFLOW_INSTRUCTIONS}`;
                 isLoading
                   ? 'Thinking...'
                   : focusedNode
-                  ? `Ask about ${(focusedNode.title || focusedNode.name || 'node').replace(/\.node$/i, '')}...`
-                  : 'Ask anything...'
+                    ? `Ask about ${(focusedNode.title || focusedNode.name || 'node').replace(/\.node$/i, '')}...`
+                    : 'Ask anything...'
               }
               value={inputVal}
               disabled={isLoading}
@@ -905,3 +942,4 @@ ${WORKFLOW_INSTRUCTIONS}`;
     </div>
   );
 }
+

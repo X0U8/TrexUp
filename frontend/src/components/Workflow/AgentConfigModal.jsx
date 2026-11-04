@@ -5,7 +5,6 @@ const AVAILABLE_AGENT_MODELS = [
   { id: 'muse-wonder', name: 'Muse Wonder', tag: '1M' },
   { id: 'muse-spark-1.3', name: 'Muse Spark 1.3', tag: '1M' },
   { id: 'muse-spark-1.3-contributor', name: 'Muse Spark 1.3 Cont.', tag: '1M' },
-  { id: 'sam-3.1', name: 'SAM 3.1', tag: 'Segment' },
   { id: 'muse-voice-transcribe', name: 'Muse Voice Transcribe', tag: 'Audio' },
   { id: 'muse-image-1.0', name: 'Muse Image 1.0', tag: 'Image' },
   { id: 'muse-spark-1.2', name: 'Muse Spark 1.2', tag: '1M' },

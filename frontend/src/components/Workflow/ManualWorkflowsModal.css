@@ -1,0 +1,291 @@
+.manual-wf-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: transparent;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 88px 16px 16px;
+}
+
+.manual-wf-modal {
+  width: 100%;
+  max-width: 320px;
+  max-height: calc(100vh - 104px);
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 16px 36px -8px rgba(15, 23, 42, 0.14), 0 4px 12px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+  pointer-events: auto;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  animation: wfSlideUp 0.18s ease-out;
+}
+
+/* While dragging, subtly fade modal card so canvas nodes are fully visible */
+.manual-wf-modal.is-dragging {
+  opacity: 0.25;
+  transform: scale(0.96);
+}
+
+@keyframes wfSlideUp {
+  from {
+    transform: translateY(8px);
+    opacity: 0.9;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Header */
+.manual-wf-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.manual-wf-title-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.manual-wf-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.manual-wf-subtitle {
+  font-size: 11.5px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.manual-wf-close-btn {
+  background: transparent;
+  border: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.manual-wf-close-btn:hover {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.manual-wf-close-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* Body */
+.manual-wf-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.manual-wf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.manual-wf-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: 9px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  cursor: grab;
+  transition: all 0.15s ease;
+}
+
+.manual-wf-item:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  transform: translateY(-1px);
+}
+
+.manual-wf-item:active {
+  cursor: grabbing;
+}
+
+.manual-wf-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.manual-wf-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.manual-wf-item-desc {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.manual-wf-drag-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 10.5px;
+  color: #475569;
+  flex-shrink: 0;
+}
+
+.manual-wf-drag-chip svg {
+  width: 12px;
+  height: 12px;
+  color: #64748b;
+}
+
+/* Empty State */
+.manual-wf-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px 12px;
+  text-align: center;
+}
+
+.manual-wf-empty-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.manual-wf-empty-desc {
+  font-size: 11.5px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.manual-wf-empty-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Footer */
+.manual-wf-footer {
+  padding: 12px 20px;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8fafc;
+}
+
+.manual-wf-count-info {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.manual-wf-done-btn {
+  background: #0f172a;
+  color: #ffffff;
+  border: none;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.manual-wf-done-btn:hover {
+  opacity: 0.88;
+}
+
+/* Exploration Workflows Trigger Button */
+.exploration-workflows-btn {
+  position: absolute;
+  top: 172px;
+  right: 24px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  padding: 7px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: #334155;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.exploration-workflows-btn:hover {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.exploration-workflows-btn svg {
+  width: 14px;
+  height: 14px;
+  color: #8b5cf6;
+}
+
+.exploration-workflows-btn .wf-btn-count {
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  border: 1px solid #e2e8f0;
+}

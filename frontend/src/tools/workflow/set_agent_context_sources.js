@@ -13,12 +13,12 @@ export const DEFINITION = {
       context_sources: {
         type: 'object',
         properties: {
-          inputFile: { type: 'boolean' },
-          inputMetadata: { type: 'boolean' },
-          previousOutput: { type: 'boolean' },
-          previousMetadata: { type: 'boolean' },
+          inputFile: { type: 'boolean', description: 'Main input content: raw document text or file bytes.' },
+          inputMetadata: { type: 'boolean', description: 'Input metadata: doc_id, file_name, file size, MIME type, category, and canvas node ID.' },
+          previousOutput: { type: 'boolean', description: 'Previous node output: main result from the immediately preceding upstream step.' },
+          previousMetadata: { type: 'boolean', description: 'Previous node metadata: upstream step execution duration, model name, and status.' },
         },
-        description: 'Context source flags.',
+        description: 'Context source flags specifying what upstream data is delivered to the agent.',
       },
     },
     required: ['workflow_id', 'node_id'],

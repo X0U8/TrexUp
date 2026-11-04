@@ -106,7 +106,11 @@ export default function DotGridCanvas({
   // Direct file drag and drop on canvas
   const handleDragOver = (e) => {
     e.preventDefault();
-    if (!onDropFile && !onDropModel) return;
+    // Only show full-canvas "Drop file" overlay if dragging real OS files
+    if (!e.dataTransfer.types.includes('Files')) {
+      return;
+    }
+    if (!onDropFile) return;
     setIsDragOver(true);
   };
 
@@ -124,6 +128,10 @@ export default function DotGridCanvas({
     if (rawData && viewportRef.current) {
       try {
         const parsed = JSON.parse(rawData);
+        // Workflows can only be dropped onto canvas nodes, not on empty canvas
+        if (parsed?.type === 'workflow') {
+          return;
+        }
         if (parsed?.type === 'workflow-model' && parsed.model && onDropModel) {
           const rect = viewportRef.current.getBoundingClientRect();
           const screenX = e.clientX - rect.left;

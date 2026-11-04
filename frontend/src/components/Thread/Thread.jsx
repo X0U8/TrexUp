@@ -37,7 +37,8 @@ export default function Thread({
   end,
   condition = '',
   label = '',
-  status = 'active', // 'active' | 'analyzing' | 'rejected'
+  status = 'active', // 'active' | 'analyzing' | 'rejected' | 'completed' | 'failed' | 'running'
+  kind = '',
   isRejected = false,
   isAnalyzing = false,
   isManual = false,
@@ -112,8 +113,10 @@ export default function Thread({
 
   const pathData = `M ${startX} ${startY} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${endX} ${endY}`;
 
-  const isError = isRejected || status === 'rejected';
-  const isBusy = isRunning || isAnalyzing || status === 'analyzing';
+  const isWorkflowRun = kind === 'workflow_run';
+  const isError = isRejected || status === 'rejected' || (isWorkflowRun && status === 'failed');
+  const isBusy = isRunning || isAnalyzing || status === 'analyzing' || (isWorkflowRun && status === 'running');
+  const wfClass = isWorkflowRun ? `workflow-run wf-status-${status}` : '';
 
   const handleClick = (e) => {
     e.stopPropagation();
@@ -123,35 +126,52 @@ export default function Thread({
 
   // Conditions NEVER render as text pills — they are visualized via the elegant darker shade.
   // displayLabel is strictly for exploration relationship labels or rejected/analyzing states.
-  const displayLabel = isError
+  const displayLabel = isWorkflowRun
+    ? `${label || 'Workflow Run'} (${status})`
+    : isError
     ? (label || 'No connection')
     : isBusy
     ? (label || 'Analyzing...')
     : (label || '');
+
+  const midX = 0.125 * startX + 0.375 * cx1 + 0.375 * cx2 + 0.125 * endX;
+  const midY = 0.125 * startY + 0.375 * cy1 + 0.375 * cy2 + 0.125 * endY;
 
   return (
     <svg className="thread-svg-layer">
       {/* Soft glow */}
       <path
         d={pathData}
-        className={`thread-glow ${condition ? 'has-condition' : ''} ${isBusy ? 'running' : ''} ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''}`}
+        className={`thread-glow ${condition ? 'has-condition' : ''} ${isBusy ? 'running' : ''} ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''} ${wfClass}`}
       />
 
       {/* Main clean cable */}
       <path
         d={pathData}
-        className={`thread-core ${condition ? 'has-condition' : ''} ${isBusy ? 'running' : ''} ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''}`}
+        className={`thread-core ${condition ? 'has-condition' : ''} ${isBusy ? 'running' : ''} ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''} ${wfClass}`}
       />
 
       {/* Port terminal caps */}
-      <circle cx={startX} cy={startY} r={4.5} className={`thread-port-glow ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''}`} />
-      <circle cx={startX} cy={startY} r={2} className="thread-port-core" />
+      <circle cx={startX} cy={startY} r={2.5} className={`thread-port-glow ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''} ${wfClass}`} />
+      <circle cx={startX} cy={startY} r={1.2} className="thread-port-core" />
 
       {!isLive && (
         <>
-          <circle cx={endX} cy={endY} r={4.5} className={`thread-port-glow ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''}`} />
-          <circle cx={endX} cy={endY} r={2} className="thread-port-core" />
+          <circle cx={endX} cy={endY} r={2.5} className={`thread-port-glow ${isError ? 'rejected' : ''} ${isManual ? 'is-manual' : ''} ${wfClass}`} />
+          <circle cx={endX} cy={endY} r={1.2} className="thread-port-core" />
         </>
+      )}
+
+      {/* Workflow Run Badge Pill on Thread Curve */}
+      {isWorkflowRun && !isLive && (
+        <g
+          className="thread-wf-badge"
+          transform={`translate(${midX}, ${midY})`}
+          onClick={handleClick}
+          title={displayLabel}
+        >
+          <circle r={4} className={`thread-wf-dot ${isError ? 'failed' : status === 'running' ? 'running' : 'completed'}`} />
+        </g>
       )}
 
       {/* Interactive Hit Target for selecting and configuring thread */}

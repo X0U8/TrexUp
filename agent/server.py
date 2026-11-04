@@ -27,6 +27,8 @@ HOST = "127.0.0.1"
 PORT = 8001
 DOCS_STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "documents")
 os.makedirs(DOCS_STORAGE_DIR, exist_ok=True)
+EXPERIMENTS_STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "experiments")
+os.makedirs(EXPERIMENTS_STORAGE_DIR, exist_ok=True)
 
 
 def ensure_dependencies():
@@ -110,6 +112,91 @@ def get_meta_client():
     except Exception as e:
         print(f"[ModelClient] Initialization error: {e}")
         return None
+
+
+def persist_file_outputs(output, manifest):
+    """An engine that declares a 'file' output may write it anywhere (often /tmp). Copy it into the
+    project's document storage so it survives, and return it as a file with a URL for preview/download."""
+    import shutil
+    from urllib.parse import quote
+
+    if not isinstance(output, dict) or not isinstance(manifest, dict):
+        return output
+    for port, spec in (manifest.get("outputs") or {}).items():
+        if not isinstance(spec, dict) or spec.get("type") != "file":
+            continue
+        value = output.get(port)
+        if isinstance(value, dict):
+            value = value.get("path") or value.get("local_path") or value.get("file_path")
+        if not isinstance(value, str) or not os.path.isfile(value):
+            continue
+        base = os.path.basename(value)
+        stored_name = f"engine_out_{time.strftime('%Y%m%d%H%M%S')}_{base}"
+        stored_path = os.path.join(DOCS_STORAGE_DIR, stored_name)
+        shutil.copyfile(value, stored_path)
+        mime, _ = mimetypes.guess_type(stored_name)
+        output[port] = {
+            "type": "file",
+            "filename": base,
+            "mime_type": mime or "application/octet-stream",
+            "local_path": stored_path,
+            "url": f"http://{HOST}:{PORT}/storage/documents/{quote(stored_name)}",
+        }
+def enrich_messages_with_local_images(messages):
+    """
+    Scans messages for local image file paths or stored document URLs (png, webp, jpg, jpeg, gif, bmp),
+    reads the local image bytes from disk, base64 encodes them, and enriches the message content
+    into OpenAI multimodal vision format ({"type": "image_url", "image_url": {"url": data_url}})
+    so vision models (like muse-spark-1.3 and muse-wonder-1.0) can view them directly.
+    """
+    import base64
+    import mimetypes
+    import re
+
+    new_messages = []
+    for msg in messages:
+        m = dict(msg)
+        content = m.get("content", "")
+        if isinstance(content, str):
+            # Extract absolute local paths or file:// paths
+            paths = re.findall(r'(?:file://)?(/[^\s"\'<>\(\)\[\]]+\.(?:webp|png|jpe?g|gif|bmp))', content, re.IGNORECASE)
+
+            # Extract local server storage URLs
+            url_matches = re.findall(r'https?://[^\s"\'<>]+/storage/documents/([^\s"\'<>\?#]+)', content, re.IGNORECASE)
+            for fname in url_matches:
+                from urllib.parse import unquote
+                clean_fname = unquote(fname)
+                cand = os.path.join(DOCS_STORAGE_DIR, clean_fname)
+                if cand not in paths and os.path.isfile(cand):
+                    paths.append(cand)
+
+            # Extract any standalone image filename that exists in DOCS_STORAGE_DIR
+            fnames = re.findall(r'\b([a-zA-Z0-9_\-]+\.(?:webp|png|jpe?g|gif))\b', content, re.IGNORECASE)
+            for fn in fnames:
+                cand = os.path.join(DOCS_STORAGE_DIR, fn)
+                if cand not in paths and os.path.isfile(cand):
+                    paths.append(cand)
+
+            image_urls = []
+            for p in paths:
+                if os.path.isfile(p):
+                    mime, _ = mimetypes.guess_type(p)
+                    mime = mime or "image/webp"
+                    try:
+                        if os.path.getsize(p) <= 12 * 1024 * 1024:
+                            with open(p, "rb") as f:
+                                b64 = base64.b64encode(f.read()).decode("utf-8")
+                            image_urls.append(f"data:{mime};base64,{b64}")
+                    except Exception as err:
+                        print(f"[VisionEnrich] Error reading image {p}: {err}")
+
+            if image_urls:
+                m["content"] = [{"type": "text", "text": content}]
+                for u in image_urls:
+                    m["content"].append({"type": "image_url", "image_url": {"url": u}})
+
+        new_messages.append(m)
+    return new_messages
 
 
 def resolve_local_document(input_data):
@@ -496,6 +583,42 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
             else:
                 self._set_cors_headers(404)
                 self.wfile.write(json.dumps({"error": "File not found"}).encode("utf-8"))
+        elif self.path.startswith("/api/experiments"):
+            try:
+                parsed = urllib.parse.urlparse(self.path)
+                q = urllib.parse.parse_qs(parsed.query)
+                project_id = q.get("project_id", [""])[0]
+                experiment_id = q.get("experiment_id", [""])[0]
+                if project_id and experiment_id:
+                    clean_name = f"{re.sub(r'[^a-zA-Z0-9_-]', '_', project_id)}_{re.sub(r'[^a-zA-Z0-9_-]', '_', experiment_id)}.json"
+                    file_path = os.path.join(EXPERIMENTS_STORAGE_DIR, clean_name)
+                    if os.path.isfile(file_path):
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        self._set_cors_headers(200)
+                        self.wfile.write(json.dumps({"status": "success", "data": data}).encode("utf-8"))
+                    else:
+                        self._set_cors_headers(200)
+                        self.wfile.write(json.dumps({"status": "not_found", "data": None}).encode("utf-8"))
+                elif project_id:
+                    prefix = f"{re.sub(r'[^a-zA-Z0-9_-]', '_', project_id)}_"
+                    items = []
+                    for fname in os.listdir(EXPERIMENTS_STORAGE_DIR):
+                        if fname.startswith(prefix) and fname.endswith(".json"):
+                            fpath = os.path.join(EXPERIMENTS_STORAGE_DIR, fname)
+                            try:
+                                with open(fpath, "r", encoding="utf-8") as f:
+                                    items.append(json.load(f))
+                            except Exception:
+                                pass
+                    self._set_cors_headers(200)
+                    self.wfile.write(json.dumps({"status": "success", "experiments": items}).encode("utf-8"))
+                else:
+                    self._set_cors_headers(400)
+                    self.wfile.write(json.dumps({"status": "error", "error": "Missing project_id"}).encode("utf-8"))
+            except Exception as e:
+                self._set_cors_headers(500)
+                self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
         else:
             self._set_cors_headers(404)
             self.wfile.write(json.dumps({"error": "Endpoint not found"}).encode("utf-8"))
@@ -581,6 +704,33 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 self._set_cors_headers(500)
                 self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
 
+        elif self.path == "/api/experiments":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body_bytes = self.rfile.read(content_length)
+                payload = json.loads(body_bytes.decode("utf-8"))
+                project_id = payload.get("project_id", "default")
+                experiment_id = payload.get("experiment_id", "experiment_01")
+                exp_data = payload.get("data", {})
+
+                clean_name = f"{re.sub(r'[^a-zA-Z0-9_-]', '_', project_id)}_{re.sub(r'[^a-zA-Z0-9_-]', '_', experiment_id)}.json"
+                file_path = os.path.join(EXPERIMENTS_STORAGE_DIR, clean_name)
+
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump(exp_data, f, indent=2)
+
+                self._set_cors_headers(200)
+                self.wfile.write(json.dumps({
+                    "status": "success",
+                    "project_id": project_id,
+                    "experiment_id": experiment_id,
+                    "local_path": file_path,
+                }).encode("utf-8"))
+                print(f"[{time.strftime('%X')}] Experiment saved to device storage -> {file_path}")
+            except Exception as e:
+                self._set_cors_headers(500)
+                self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
+
         elif self.path == "/api/engines/run":
             start_time = time.perf_counter()
             try:
@@ -642,7 +792,7 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                             if val is None or val == "":
                                 raise ValueError(f"Missing required input '{port_name}' ({port_spec.get('type', 'any')})")
 
-                output = exec_scope["run"](input_data)
+                output = persist_file_outputs(exec_scope["run"](input_data), manifest)
                 duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
                 is_validation_failure = (
@@ -727,6 +877,33 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                         or ""
                     )
 
+                # Image generation (muse-image-1.0): one image from the prompt, returned inline as a data URL.
+                if model_name == "muse-image-1.0":
+                    image_prompt = (prompt_text or "").strip()[:4000]
+                    if not image_prompt:
+                        raise ValueError("Image step needs a prompt: connect an upstream text step or write one in the agent settings.")
+                    img_res = client.images.generate(model=model_name, prompt=image_prompt, n=1)
+                    img_b64 = img_res.data[0].b64_json
+                    duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                    self._set_cors_headers(200)
+                    res = {
+                        "status": "success",
+                        "model": model_name,
+                        "response": "",
+                        "tool_calls": [],
+                        "output": {
+                            "synthesis": "Image generated from the prompt.",
+                            "agent_synthesis": "Image generated from the prompt.",
+                            "image_prompt": image_prompt,
+                            "image_data_url": f"data:image/webp;base64,{img_b64}",
+                            "model": model_name,
+                            "duration_ms": duration_ms,
+                        },
+                    }
+                    self.wfile.write(json.dumps(res).encode("utf-8"))
+                    print(f"[{time.strftime('%X')}] Image generated -> HTTP 200 ({duration_ms}ms)")
+                    return
+
                 # Check for Muse Voice Transcribe / audio ASR
                 if model_name == "muse-voice-transcribe-1.0":
                     raw_b64 = ""
@@ -790,6 +967,12 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                     should_include_file = bool(input_data.get("file") or input_data.get("file_bytes_b64") or input_data.get("include_raw_file"))
                 elif should_include_file is None:
                     should_include_file = False
+
+                # A file produced by an earlier step (for example a generated image) is attached explicitly.
+                step_image_path = data.get("image_path") or ""
+                if step_image_path and os.path.isfile(step_image_path):
+                    file_path = step_image_path
+                    should_include_file = True
 
                 file_id = get_or_upload_file_id(client, file_path) if (file_path and should_include_file) else None
 
@@ -1001,7 +1184,7 @@ class EngineRequestHandler(BaseHTTPRequestHandler):
                 elif model_name in ["muse-voice", "muse-voice-transcribe"]:
                     model_name = "muse-voice-transcribe-1.0"
 
-                messages = data.get("messages", [])
+                messages = enrich_messages_with_local_images(data.get("messages", []))
                 tools_spec = data.get("tools")
                 temp = data.get("temperature")
                 reasoning = data.get("reasoning_effort")

@@ -166,36 +166,56 @@ export function getSubtreeNodeIds(rootId, arg2, arg3) {
   const result = new Set([rootId]);
   const queue = [rootId];
 
-  const adj = {};
+  // Build directed parent -> child mapping
+  const children = {};
   for (const c of Object.values(connections || {})) {
     if (!c) continue;
     const src = c.source_node_id || c.source || c.startNodeId;
     const tgt = c.target_node_id || c.target || c.endNodeId;
-    if (!src || !tgt) continue;
-    (adj[src] ||= []).push(tgt);
-    (adj[tgt] ||= []).push(src);
-  }
+    if (!src || !tgt || src === tgt) continue;
 
-  const isOtherResource = (id) => {
-    if (id === rootId) return false;
-    const n = nodes[id];
-    if (!n) return false;
-    return (
-      n.category === 'resource' ||
-      n.type === 'document' ||
-      n.type === 'resource' ||
-      Boolean(n.cloudinaryUrl) ||
-      Boolean(n.fileSize)
-    );
-  };
+    const srcNode = nodes[src];
+    const tgtNode = nodes[tgt];
+
+    const isSrcResource =
+      srcNode?.category === 'resource' ||
+      srcNode?.type === 'document' ||
+      srcNode?.type === 'resource' ||
+      Boolean(srcNode?.cloudinaryUrl) ||
+      Boolean(srcNode?.fileSize);
+
+    const isTgtResource =
+      tgtNode?.category === 'resource' ||
+      tgtNode?.type === 'document' ||
+      tgtNode?.type === 'resource' ||
+      Boolean(tgtNode?.cloudinaryUrl) ||
+      Boolean(tgtNode?.fileSize);
+
+    let parent = src;
+    let child = tgt;
+
+    // If one is resource and other is not, resource is strictly the parent
+    if (isTgtResource && !isSrcResource) {
+      parent = tgt;
+      child = src;
+    } else if (!isSrcResource && !isTgtResource && srcNode && tgtNode) {
+      // If src is clearly to the right of tgt, connection was drawn right-to-left
+      if (typeof srcNode.x === 'number' && typeof tgtNode.x === 'number' && srcNode.x > tgtNode.x + 50) {
+        parent = tgt;
+        child = src;
+      }
+    }
+
+    (children[parent] ||= []).push(child);
+  }
 
   while (queue.length > 0) {
     const curr = queue.shift();
-    const neighbors = adj[curr] || [];
-    for (const neighborId of neighbors) {
-      if (!result.has(neighborId) && !isOtherResource(neighborId)) {
-        result.add(neighborId);
-        queue.push(neighborId);
+    const kids = children[curr] || [];
+    for (const kid of kids) {
+      if (!result.has(kid)) {
+        result.add(kid);
+        queue.push(kid);
       }
     }
   }

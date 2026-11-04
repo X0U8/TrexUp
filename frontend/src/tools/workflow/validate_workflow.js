@@ -1,4 +1,20 @@
 import { resolveWorkflow } from './_shared';
+import { getAllEngineIds, BUILT_IN_ENGINE_IDS } from '../../utils/engineUtils';
+import { isEngineTested } from '../engine/testedEngines';
+
+// A thread condition is a JS-like expression the runner evaluates; check it compiles.
+function conditionCompiles(expr) {
+  const sanitized = expr
+    .replace(/\bTrue\b/g, 'true')
+    .replace(/\bFalse\b/g, 'false')
+    .replace(/\bcategory\s+in\s+\[(.*?)\]/g, '[$1].includes(category)');
+  try {
+    new Function('data', `with(data) { return Boolean(${sanitized}); }`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export const DEFINITION = {
   type: 'function',
@@ -19,7 +35,9 @@ export async function run(ctx, args) {
 
   const resolved = resolveWorkflow(ctx, workflowId);
   const nodes = resolved.workflowData.nodes || {};
-  const threads = resolved.workflowData.threads || [];
+  const threads = Array.isArray(resolved.workflowData.threads)
+    ? resolved.workflowData.threads
+    : Object.values(resolved.workflowData.threads || {});
   const nodeIds = Object.keys(nodes);
 
   const problems = [];
@@ -33,8 +51,12 @@ export async function run(ctx, args) {
   const hasInput = Object.values(nodes).some((n) => n.type === 'input');
   const hasOutput = Object.values(nodes).some((n) => n.type === 'output');
 
+  const inputCount = Object.values(nodes).filter((n) => n.type === 'input').length;
+  const outputCount = Object.values(nodes).filter((n) => n.type === 'output').length;
   if (!hasInput) problems.push('Workflow is missing an input trigger node.');
+  if (inputCount > 1) problems.push(`Workflow has ${inputCount} input nodes; it must have exactly one.`);
   if (!hasOutput) warnings.push('Workflow has no designated output node.');
+  if (outputCount > 1) problems.push(`Workflow has ${outputCount} output nodes; it must have exactly one.`);
 
   // Validate threads reference valid nodes
   threads.forEach((th) => {
@@ -103,7 +125,7 @@ export async function run(ctx, args) {
 
     const unreachable = nodeIds.filter((id) => !reachable.has(id));
     if (unreachable.length > 0) {
-      warnings.push(`Nodes not reached by input pipeline: ${unreachable.join(', ')}`);
+      problems.push(`Nodes not reached from the input, so they will never run: ${unreachable.join(', ')}`);
     }
   }
 
@@ -146,13 +168,39 @@ export async function run(ctx, args) {
     }
   }
 
+  // Threads whose conditions will not compile
+  threads.forEach((th) => {
+    if (th.condition && th.condition.trim() && !conditionCompiles(th.condition.trim())) {
+      problems.push(`Thread "${th.id}" has an invalid condition: ${th.condition}`);
+    }
+  });
+
   // Validate agent and engine configs
+  const knownEngines = getAllEngineIds(ctx.engines || [], Object.keys(ctx.enginesData || {}));
   Object.values(nodes).forEach((n) => {
     if (n.type === 'agent' && !n.modelId) {
       warnings.push(`Agent node "${n.title || n.id}" has no model assigned.`);
     }
     if (n.type === 'engine' && !n.engineId) {
       problems.push(`Engine node "${n.title || n.id}" is not bound to any Python engine ID.`);
+    } else if (n.type === 'engine' && !knownEngines.includes(n.engineId)) {
+      problems.push(`Engine node "${n.title || n.id}" uses engine "${n.engineId}", which does not exist.`);
+    }
+  });
+
+  // Checklist: every agent needs an input and instructions; every custom engine needs a passing test.
+  const incoming = new Set(threads.map((th) => th.to));
+  Object.values(nodes).forEach((n) => {
+    const label = `"${n.title || n.id}"`;
+    if (n.type === 'agent') {
+      if (!incoming.has(n.id)) problems.push(`Agent ${label} has no input: connect it from an upstream step.`);
+      if (!n.systemPrompt || !String(n.systemPrompt).trim()) problems.push(`Agent ${label} has no instructions (prompt).`);
+    }
+    if (n.type === 'engine' && n.engineId && !BUILT_IN_ENGINE_IDS.includes(n.engineId)) {
+      const code = ctx.enginesData?.[n.engineId]?.code || '';
+      if (!isEngineTested(n.engineId, code)) {
+        problems.push(`Engine ${label} ("${n.engineId}") has not passed a test run. Call test_engine with sample input first.`);
+      }
     }
   });
 

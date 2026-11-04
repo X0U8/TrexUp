@@ -10,7 +10,7 @@
   overflow-y: auto;
   box-sizing: border-box;
   font-family: 'Source Serif 4', Georgia, serif;
-  z-index: 40;
+  z-index: 10;
   transform: translateZ(0);
   -webkit-overflow-scrolling: touch;
 }

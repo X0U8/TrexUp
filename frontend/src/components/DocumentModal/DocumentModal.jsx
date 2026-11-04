@@ -1,6 +1,83 @@
 import { useState, useEffect, useRef } from 'react';
 import './DocumentModal.css';
 
+const SERVER_FILES = 'http://127.0.0.1:8001/storage/documents/';
+const TEXT_EXT = ['txt', 'md', 'csv', 'tsv', 'json', 'log'];
+const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'];
+
+/** Where the file lives: the server's stored copy, else the in-session blob, else the cloud URL. */
+function resolvePreviewUrl(node) {
+  const localPath = node?.local_path || node?.localPath || '';
+  if (localPath) {
+    const storedName = localPath.split(/[\\/]/).pop();
+    return `${SERVER_FILES}${encodeURIComponent(storedName)}`;
+  }
+  return node?.localBlobUrl || node?.cloudinaryUrl || node?.url || '';
+}
+
+/** Shows the file itself: text, PDF or image, with a zoom button for a full-size view. */
+function DocumentPreview({ node }) {
+  const [text, setText] = useState('');
+  const [zoomed, setZoomed] = useState(false);
+  const [missing, setMissing] = useState(false);
+  const name = (node.file_name || node.fileName || node.title || node.name || '').replace(/\.node$/i, '');
+  // The stored file's own extension is the truth; the title can say something else.
+  const storedName = (node.local_path || node.localPath || '').split(/[\\/]/).pop();
+  const ext = (storedName.includes('.') ? storedName : name).split('.').pop().toLowerCase();
+  const url = resolvePreviewUrl(node);
+  const isText = TEXT_EXT.includes(ext);
+  const isImage = IMAGE_EXT.includes(ext);
+  const isPdf = ext === 'pdf';
+
+  useEffect(() => {
+    if (!url || !isText) return;
+    let cancelled = false;
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((t) => !cancelled && setText(t))
+      .catch(() => !cancelled && setMissing(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [url, isText]);
+
+  if (!url) {
+    return <div className="doc-preview-empty">No file to preview.</div>;
+  }
+  if (!isText && !isImage && !isPdf) {
+    return <div className="doc-preview-empty">No preview for .{ext || 'this'} files.</div>;
+  }
+
+  const content = (large) => {
+    if (missing) return <div className="doc-preview-empty">File not found in storage.</div>;
+    if (isImage) return <img className="doc-preview-img" src={url} alt={name} onError={() => setMissing(true)} />;
+    if (isPdf) return <iframe className={large ? 'doc-preview-frame large' : 'doc-preview-frame'} src={url} title={name} />;
+    return <pre className={large ? 'doc-preview-text large' : 'doc-preview-text'}>{text || 'Loading…'}</pre>;
+  };
+
+  return (
+    <div className="doc-preview">
+      <div className="doc-preview-bar">
+        <span className="doc-info-label">Preview</span>
+        <button type="button" className="doc-preview-zoom" onClick={() => setZoomed(true)}>
+          Zoom
+        </button>
+      </div>
+      <div className="doc-preview-body">{content(false)}</div>
+      {zoomed && (
+        <div className="doc-preview-overlay" onClick={() => setZoomed(false)}>
+          <div className="doc-preview-overlay-inner" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="doc-preview-close" onClick={() => setZoomed(false)} aria-label="Close zoom">
+              ✕
+            </button>
+            {content(true)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DocumentModal({ node, isOpen, onClose, onRename, onDelete }) {
   const [isEditing, setIsEditing] = useState(false);
   const [baseName, setBaseName] = useState('');
@@ -60,6 +137,8 @@ export default function DocumentModal({ node, isOpen, onClose, onRename, onDelet
     if (!isOpen) return;
 
     const handlePointerDownOutside = (e) => {
+      // Do not close when interacting with the model chat panel
+      if (e.target.closest('.model-chat-panel')) return;
       if (modalBoxRef.current && !modalBoxRef.current.contains(e.target)) {
         onClose();
       }
@@ -186,11 +265,12 @@ export default function DocumentModal({ node, isOpen, onClose, onRename, onDelet
             </div>
           ) : null}
 
-          {node.description ? (
+          {(isResource || node.local_path || node.localPath) && <DocumentPreview node={node} />}
+          {(node.content || node.description) ? (
             <div className="doc-info-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '5px' }}>
               <span className="doc-info-label">Description</span>
-              <span className="doc-info-val" style={{ fontSize: '12px', color: '#475569', lineHeight: 1.45, textAlign: 'left' }}>
-                {node.description}
+              <span className="doc-info-val" style={{ fontSize: '12px', color: '#475569', lineHeight: 1.45, textAlign: 'left', maxHeight: '240px', overflowY: 'auto', whiteSpace: 'pre-wrap', width: '100%', wordBreak: 'break-word' }}>
+                {node.content || node.description}
               </span>
             </div>
           ) : null}

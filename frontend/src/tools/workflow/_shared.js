@@ -8,7 +8,6 @@ export const AVAILABLE_AGENT_MODELS = [
   { id: 'muse-wonder', name: 'Muse Wonder', tag: '1M', desc: 'Frontier reasoning, complex agent planning, and broad multimodal understanding.' },
   { id: 'muse-spark-1.3-contributor', name: 'Muse Spark 1.3 Contributor', tag: '1M', desc: 'Same capabilities as Muse Spark 1.3 at discounted contributor tier.' },
   { id: 'muse-voice-transcribe', name: 'Muse Voice Transcribe', tag: 'Audio', desc: 'Speech-to-text transcription with speaker turn detection and timestamps.' },
-  { id: 'sam-3.1', name: 'SAM 3.1', tag: 'Segment', desc: 'Zero-shot segmentation and spatial tracking on images and video frames.' },
   { id: 'muse-image-1.0', name: 'Muse Image 1.0', tag: 'Image', desc: 'Image generation and transformation model.' },
   { id: 'muse-spark-1.2', name: 'Muse Spark 1.2', tag: '1M', desc: 'Previous generation Muse Spark reasoning model.' },
   { id: 'muse-spark-1.2-contributor', name: 'Muse Spark 1.2 Contributor', tag: '1M', desc: 'Contributor tier for Muse Spark 1.2.' },
@@ -22,7 +21,9 @@ export function resolveWorkflow(ctx, workflowId) {
   const customWf = ctx.workflowsData?.[targetId] || {};
 
   const nodes = customWf.nodes || defaultWf.nodes || {};
-  const threads = customWf.threads || defaultWf.threads || [];
+  const rawThreads = customWf.threads || defaultWf.threads || [];
+  // Threads may be stored as a list or as an object (the runner accepts both).
+  const threads = Array.isArray(rawThreads) ? rawThreads : Object.values(rawThreads);
   const name = customWf.name || defaultWf.name || targetId;
   const description = customWf.description || defaultWf.description || '';
 

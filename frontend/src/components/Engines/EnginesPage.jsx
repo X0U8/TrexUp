@@ -4,6 +4,51 @@ import EngineCodeEditor from './EngineCodeEditor';
 import SERVER_PY_SOURCE from '../../../../agent/server.py?raw';
 import './EnginesPage.css';
 
+const PREVIEW_TEXT_EXT = ['txt', 'md', 'csv', 'tsv', 'json', 'log'];
+const PREVIEW_IMAGE_EXT = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'];
+
+/** A file an engine produced: text or image shown inline, and always a download button. */
+function EngineFilePreview({ file }) {
+  const [text, setText] = useState('');
+  const [missing, setMissing] = useState(false);
+  const ext = (file.filename || '').split('.').pop().toLowerCase();
+  const isText = PREVIEW_TEXT_EXT.includes(ext);
+  const isImage = PREVIEW_IMAGE_EXT.includes(ext);
+
+  useEffect(() => {
+    if (!isText || !file.url) return;
+    let cancelled = false;
+    fetch(file.url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((t) => !cancelled && setText(t))
+      .catch(() => !cancelled && setMissing(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [file.url, isText]);
+
+  return (
+    <div className="engine-file-preview" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
+      <div className="file-result-meta">
+        <span className="file-result-name">{file.filename}</span>
+        <span className="file-result-type">{file.mime_type}</span>
+      </div>
+      {missing ? (
+        <span className="engine-output-placeholder">File not found in storage.</span>
+      ) : isImage ? (
+        <img src={file.url} alt={file.filename} style={{ maxWidth: '100%', borderRadius: '8px' }} onError={() => setMissing(true)} />
+      ) : isText ? (
+        <pre className="engine-output-text">{text || 'Loading…'}</pre>
+      ) : (
+        <span className="engine-output-placeholder">No preview for this file type.</span>
+      )}
+      <a className="file-result-download-btn" href={file.url} download={file.filename} style={{ alignSelf: 'flex-start', textDecoration: 'none' }}>
+        Download
+      </a>
+    </div>
+  );
+}
+
 const MANIFEST_SPEC_GUIDE = `# Manifest specification:
 # inputs: "text", "file", "image", "audio", "video", "json", "number", "boolean"
 # outputs: "json", "file", "text", "image", "audio"
@@ -2136,6 +2181,12 @@ export default function EnginesPage({
                       </button>
                     </div>
                   )}
+
+                  {Object.values(simOutput.output && typeof simOutput.output === 'object' ? simOutput.output : {})
+                    .filter((v) => v && v.type === 'file' && v.url)
+                    .map((f) => (
+                      <EngineFilePreview key={f.url} file={f} />
+                    ))}
 
                   <pre className="engine-output-text">
                     {JSON.stringify(simOutput, null, 2)}

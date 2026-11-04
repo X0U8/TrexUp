@@ -16,8 +16,12 @@ export default function MovableNode({
   onClick,
   onPortStart,
   onPortEnd,
+  onDropWorkflow,
+  isWorkflowDragging = false,
 }) {
   const [isDragging, setIsDragging] = useState(false);
+  const [isWorkflowTarget, setIsWorkflowTarget] = useState(false);
+  const [thumbBroken, setThumbBroken] = useState(false);
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, initialX: 0, initialY: 0 });
   const hasMovedRef = useRef(false);
 
@@ -80,6 +84,13 @@ export default function MovableNode({
   const resolvedWidth = dims.width;
   const resolvedHeight = dims.height;
 
+  // A generated or extracted image shows a small thumbnail on its card (hidden if the file is missing).
+  const storedPath = data.local_path || data.localPath || '';
+  const thumbUrl =
+    !isResource && /\.(png|jpe?g|webp|gif)$/i.test(storedPath)
+      ? `http://127.0.0.1:8001/storage/documents/${encodeURIComponent(storedPath.split(/[\\/]/).pop())}`
+      : '';
+
   const nodeTitle = isUploading
     ? 'Loading document...'
     : isExtracting
@@ -88,7 +99,7 @@ export default function MovableNode({
 
   return (
     <div
-      className={`movable-node ${isResource ? 'resource-node' : 'info-node'} type-${rawType} ${isDragging ? 'dragging' : ''} ${isSelected ? 'selected-tree-node' : ''}`}
+      className={`movable-node ${isResource ? 'resource-node' : 'info-node'} type-${rawType} ${isDragging ? 'dragging' : ''} ${isSelected ? 'selected-tree-node' : ''} ${!isResource && isWorkflowDragging ? 'workflow-droppable' : ''} ${isWorkflowTarget ? 'workflow-drop-target' : ''}`}
       data-node-id={id}
       style={{
         width: `${resolvedWidth}px`,
@@ -98,10 +109,47 @@ export default function MovableNode({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onDragOver={(e) => {
+        // Only non-file and non-resource nodes can accept workflow drops
+        if (isResource) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        setIsWorkflowTarget(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget)) return;
+        setIsWorkflowTarget(false);
+      }}
+      onDrop={(e) => {
+        if (isResource) return;
+        setIsWorkflowTarget(false);
+        e.preventDefault();
+        e.stopPropagation();
+        let raw = '';
+        try {
+          raw = e.dataTransfer.getData('application/json') || e.dataTransfer.getData('text/plain');
+        } catch {
+          // ignore
+        }
+        let parsed = null;
+        if (raw) {
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            // ignore
+          }
+        }
+        onDropWorkflow?.(parsed, data, { clientX: e.clientX, clientY: e.clientY });
+      }}
       title={nodeTitle}
     >
       <div className="node-content">
         <div className="node-title-row">
+          {thumbUrl && !thumbBroken && (
+            <img className="node-thumb" src={thumbUrl} alt="" onError={() => setThumbBroken(true)} />
+          )}
+          {!isResource && <span className={`node-type-dot-inline type-${rawType}`} title={rawType.replace('_', ' ')} />}
           <span className="node-filename">{displayName}</span>
           {isLoading && (
             <div

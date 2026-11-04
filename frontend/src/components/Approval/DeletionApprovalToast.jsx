@@ -41,16 +41,21 @@ export default function DeletionApprovalToast({ approval, onDecision }) {
     onDecision?.(false);
   };
 
+  const isExperiment = approval?.actionType === 'experiment' || approval?.toolName === 'propose_experiment';
+  const badgeLabel = approval?.badge || (isExperiment ? 'AI experiment request' : 'AI deletion request');
+  const questionText = approval?.question || (isExperiment ? `Start experiment: ${approval.itemLabel}?` : `Delete ${approval.itemLabel}?`);
+  const subtext = approval?.subtext || (isExperiment ? 'Approving will create the experiment and begin the research plan.' : 'Action will be denied automatically if not approved.');
+
   return (
     <div className="deletion-approval-bar" role="alert">
       <div className="approval-bar-header">
-        <span className="approval-badge">AI deletion request</span>
+        <span className="approval-badge">{badgeLabel}</span>
         <span className="approval-timer">{timeLeft}s remaining</span>
       </div>
 
       <div className="approval-bar-body">
-        <span className="approval-question">Delete {approval.itemLabel}?</span>
-        <span className="approval-subtext">Action will be denied automatically if not approved.</span>
+        <span className="approval-question">{questionText}</span>
+        <span className="approval-subtext">{subtext}</span>
       </div>
 
       <div className="approval-bar-progress">

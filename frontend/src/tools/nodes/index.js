@@ -6,6 +6,7 @@
  *     result = runNodeTool(ctx, name, args)
  */
 import * as list_explorations from './list_explorations';
+import * as canvas_outline from './canvas_outline';
 import * as search_nodes from './search_nodes';
 import * as create_node from './create_node';
 import * as create_nodes from './create_nodes';
@@ -31,6 +32,7 @@ export { NODE_INSTRUCTIONS } from './nodeInstructions';
 export const MODULES = Object.fromEntries(
   [
     list_explorations,
+    canvas_outline,
     search_nodes,
     create_node,
     create_nodes,
@@ -51,6 +53,7 @@ export const NODE_TOOL_NAMES = Object.keys(MODULES);
 MODULES.search_investigation = MODULES.search_nodes;
 export const NODE_TOOL_DEFINITIONS = [
   list_explorations.DEFINITION,
+  canvas_outline.DEFINITION,
   search_nodes.DEFINITION,
   create_node.DEFINITION,
   create_nodes.DEFINITION,

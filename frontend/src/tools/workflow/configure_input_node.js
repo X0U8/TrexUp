@@ -12,8 +12,8 @@ export const DEFINITION = {
       trigger: { type: 'string', enum: ['file_drop', 'node_connect', 'manual', 'scheduled'], description: 'Trigger event type.' },
       accepted_types: {
         type: 'array',
-        items: { type: 'string' },
-        description: 'Allowed media types (documents, text, images, audio, data). Note: video and gif are blocked.',
+        items: { type: 'string', enum: ['files', 'canvas_nodes'] },
+        description: 'Allowed input formats: "files" (documents, media, tables) and/or "canvas_nodes" (findings, hypotheses, evidence).',
       },
       source_scope: { type: 'string', description: 'Source scope (e.g. "uploaded_documents", "canvas_nodes").' },
     },
@@ -50,9 +50,16 @@ export async function run(ctx, args) {
   }
 
   if (Array.isArray(args?.accepted_types)) {
-    // Strictly filter out video and gif
-    const sanitized = args.accepted_types.filter((t) => t !== 'video' && t !== 'gif');
-    updatedNode.acceptedTypes = sanitized;
+    const valid = args.accepted_types
+      .map((t) => {
+        if (t === 'canvas_nodes' || t === 'canvas_node' || t === 'node' || t === 'nodes') return 'canvas_nodes';
+        if (['files', 'file', 'documents', 'text', 'images', 'audio', 'data'].includes(t)) return 'files';
+        return null;
+      })
+      .filter(Boolean);
+    const resolvedTypes = Array.from(new Set(valid.length > 0 ? valid : ['files', 'canvas_nodes']));
+    updatedNode.acceptedTypes = resolvedTypes;
+    updatedNode.sub = `${resolvedTypes.length} accepted format${resolvedTypes.length === 1 ? '' : 's'}`;
   }
 
   if (args?.source_scope) {

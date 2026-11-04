@@ -12,6 +12,17 @@ GOLDEN RULES FOR WORKFLOW ARCHITECTURE:
 3. THE FILE-DROP REQUIREMENT: If the workflow triggers on "file_drop" and creates canvas nodes, ALWAYS include the "resource_bridge" engine immediately after Input. The Resource Bridge registers the file and creates its Document node on the canvas so that downstream agents know the active document node ID to link findings/topics to.
 4. WORKFLOW NAME: Always provide a descriptive "name" parameter when calling "create_workflow" (e.g. name: "Document Analysis Pipeline").
 
+BEFORE YOU BUILD:
+- State the goal in one line: the input, and the output you expect (text, image, or canvas nodes).
+- Design the pipeline yourself. Use existing engines and agents where they fit. Create a custom engine only when no existing one does the job, and test it with test_engine before adding it to the workflow.
+
+THE CHECKLIST (the validator checks these after every change; the pipeline is not done until all pass):
+- Exactly one Input and one Output, and every step is on a path from Input to Output.
+- Every agent receives input from an upstream step.
+- Every agent has instructions (prompt).
+- Every custom engine has passed test_engine with its current code.
+- Nothing is left dangling and there is no Input-to-Output bypass.
+
 CREATING COMPLETE PIPELINES (RECOMMENDED METHOD - ONE SHOT):
 - Call "create_workflow" with "pipeline" to build the entire unbroken workflow in a single step!
   Parameters:
@@ -45,11 +56,11 @@ Always inspect and configure every parameter deliberately according to its speci
 - "file_detection": Detects MIME type, binary magic bytes, and file category.
 - "document_extractor": Extracts clean text, headings, and tables from documents. MANDATORY before any agent that needs to analyze document content!
 
-2. CONTEXT SOURCES (WHAT EACH CHECKBOX DELIVERS TO AN AGENT):
-- "Input File Content" (inputFile): Passes raw file text and local path. Required if the agent directly inspects raw files.
-- "Input Metadata" (inputMetadata): Passes Doc ID, file name, category, and canvas Document Node ID. MANDATORY so the agent knows the canvas node to link its findings to!
-- "Previous Node Output" (previousOutput): Passes outputs from upstream nodes (e.g. extracted_text from document_extractor). MANDATORY if a prior engine extracted the text!
-- "Previous Node Metadata" (previousMetadata): Passes confidence, duration, and escalation flags.
+2. CONTEXT SOURCES (WHAT EACH CONTEXT OPTION DELIVERS TO AN AGENT):
+- "input" / "Input File Content" (inputFile): The main content given as input to the workflow (e.g. raw document text, file bytes, or source content).
+- "input_metadata" / "Input Metadata" (inputMetadata): Identity and technical metadata of the main input (doc_id, file_name, file size, MIME type, category, and canvas document node ID). MANDATORY so downstream agents know which canvas node to link findings to!
+- "previous_output" / "Previous Node Output" (previousOutput): The primary result produced by the immediately preceding upstream step (e.g. clean extracted_text from document_extractor, or synthesized insights from a prior agent).
+- "previous_output_metadata" / "Previous Node Metadata" (previousMetadata): Execution and performance metadata from the preceding step (duration, model name, status, confidence score, and error flags).
 
 3. AGENT PROMPT & INSTRUCTION RULES:
 - NEVER tell an agent to call "search_nodes" to find the document! The canvas Document Node ID is ALREADY injected into the agent's context and tool calls automatically.
@@ -61,4 +72,6 @@ Always inspect and configure every parameter deliberately according to its speci
 [ ] If the agent needs to read text, is "document_extractor" present, or is "inputFile" / "previousOutput" enabled?
 [ ] Is "inputMetadata" checked so the agent has the document node ID?
 [ ] Is the prompt clear and actionable without unnecessary search instructions?
-[ ] Are all nodes connected in an unbroken chain to Output with zero bypass threads?`;
+[ ] Are all nodes connected in an unbroken chain to Output with zero bypass threads?
+[ ] Does every agent have an upstream input and instructions?
+[ ] Has every custom engine passed test_engine?`;

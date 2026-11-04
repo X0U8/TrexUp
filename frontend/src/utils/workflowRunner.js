@@ -35,7 +35,6 @@ export function findWorkflowsForTrigger(project, triggerType) {
     return matched;
   }
 
-  // Fallbacks based on predefined blueprints if nothing explicitly matched
   if (triggerType === 'file_drop') {
     return [{
       id: 'extraction',
@@ -46,6 +45,20 @@ export function findWorkflowsForTrigger(project, triggerType) {
     return [{
       id: 'connection_synthesis',
       data: workflowsData.connection_synthesis || DEFAULT_WORKFLOWS.connection_synthesis,
+    }];
+  }
+  if (triggerType === 'manual') {
+    const manualMatched = [];
+    for (const [wfId, wf] of Object.entries(workflowsData)) {
+      if (wf?.nodes?.input?.trigger === 'manual') {
+        manualMatched.push({ id: wfId, data: wf });
+      }
+    }
+    if (manualMatched.length > 0) return manualMatched;
+    const firstWfId = project?.workflows?.[0] || 'extraction';
+    return [{
+      id: firstWfId,
+      data: workflowsData[firstWfId] || DEFAULT_WORKFLOWS[firstWfId],
     }];
   }
 
@@ -116,6 +129,7 @@ function sanitizeContextForPrompt(obj, depth = 0) {
   if (!obj || typeof obj !== 'object' || depth > 3) return {};
   const cleaned = {};
   const blockedKeys = new Set([
+    'image_data_url', // generated image: shown on its step only, never sent to a model as text
     'file',
     'file_bytes_b64',
     'b64',
@@ -150,8 +164,21 @@ function sanitizeContextForPrompt(obj, depth = 0) {
  * Executes a model agent against the Meta Model API via the local runner (http://127.0.0.1:8001/api/agents/run).
  */
 /** One line describing what a tool call did, so the model can see its own earlier actions. */
+// Read-only tools never change the canvas, so a repeat call with nothing changed since is skipped.
+const READ_ONLY_TOOLS = ['canvas_outline', 'search_nodes', 'list_explorations', 'get_node', 'get_connections'];
+
 function summarizeToolAction(toolName, args, result) {
+  if (result?.already_read) return `${toolName}: skipped, already read this run and nothing changed since (see the earlier result)`;
   if (!result || result.error) return `${toolName}: FAILED - ${result?.error || 'no result'}`;
+  if (toolName === 'canvas_outline' && typeof result.outline === 'string') {
+    const counts = Object.entries(result.counts || {}).map(([k, v]) => `${v} ${k}`).join(', ') || 'none';
+    const problems = Array.isArray(result.problems) && result.problems.length > 0 ? result.problems.join(' ') : 'none';
+    return `canvas_outline: read. Counts: ${counts}. Problems: ${problems}\nOutline:\n${result.outline.slice(0, 2000)}`;
+  }
+  if (toolName === 'search_nodes' && Array.isArray(result.nodes)) {
+    const found = result.nodes.map((n) => `"${n.title}" (id: ${n.id})`).join('; ');
+    return `search_nodes "${args?.query || ''}": ${result.count} match(es)${found ? `: ${found}` : ''}`;
+  }
   if (toolName === 'create_node' && result.node) {
     return `create_node: created ${result.node.type} node "${result.node.title}" (id: ${result.node.id})`;
   }
@@ -167,7 +194,77 @@ function summarizeToolAction(toolName, args, result) {
   return `${toolName}: ${JSON.stringify(rest).slice(0, 300)}`;
 }
 
+/**
+ * muse-image-1.0: the prompt is the agent prompt plus the upstream text. The image comes back
+ * as a data URL on the step's output and is shown there; it is never added to the payload that
+ * later steps receive.
+ */
+async function executeImageModel({ agentPrompt, inputPayload }) {
+  const start = performance.now();
+  const upstream = inputPayload?.synthesis || inputPayload?.agent_synthesis || inputPayload?.node_text || inputPayload?.extracted_text || inputPayload?.text || '';
+  // The subject comes first (the node's text or the upstream output); the agent prompt sets the style.
+  const prompt = [upstream, agentPrompt ? `Style and constraints: ${agentPrompt}` : '']
+    .map((p) => (typeof p === 'string' ? p.trim() : ''))
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, 4000);
+  if (!prompt) {
+    return {
+      status: 'error',
+      httpCode: 400,
+      error: 'Image step has no prompt. Connect an upstream text step or write a prompt in the agent settings.',
+      durationMs: 0,
+    };
+  }
+  try {
+    const res = await fetch('http://127.0.0.1:8001/api/agents/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'muse-image-1.0', prompt, input_data: {} }),
+    });
+    const data = await res.json().catch(() => ({}));
+    const elapsed = Math.round(performance.now() - start);
+    if (res.status === 200 && data.status === 'success' && data.output?.image_data_url) {
+      // Save the picture as a file so the next step can attach it. The save is best effort:
+      // if it fails, the image still shows on this step.
+      const output = { ...data.output };
+      try {
+        const saved = await fetch('http://127.0.0.1:8001/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_name: `generated_image_${Date.now()}.webp`,
+            doc_id: `img_${Date.now()}`,
+            file_bytes_b64: output.image_data_url,
+          }),
+        });
+        const savedData = await saved.json().catch(() => ({}));
+        if (saved.ok && savedData.local_path) output.image_path = savedData.local_path;
+      } catch {
+        // keep the inline image only
+      }
+      return { status: 'success', httpCode: 200, output, response: '', durationMs: data.duration_ms || elapsed };
+    }
+    return {
+      status: 'error',
+      httpCode: res.status,
+      error: data.error || `Image model call returned HTTP ${res.status}`,
+      durationMs: elapsed,
+    };
+  } catch (err) {
+    return {
+      status: 'error',
+      httpCode: 503,
+      error: `Image connection failed: ${err.message}`,
+      durationMs: Math.round(performance.now() - start),
+    };
+  }
+}
+
 async function executeAgentModel({ modelId, systemPrompt, agentPrompt, temperature, reasoningEffort, inputPayload, targetTitle, tools, progress }) {
+  if (modelId === 'muse-image-1.0') {
+    return executeImageModel({ agentPrompt, inputPayload });
+  }
   const start = performance.now();
   try {
     const isComparison = Boolean(
@@ -205,6 +302,10 @@ async function executeAgentModel({ modelId, systemPrompt, agentPrompt, temperatu
         modelId?.toLowerCase().includes('vision') ||
         Boolean(inputPayload.is_vision || inputPayload.escalation?.needs_vision_model);
 
+      if (inputPayload.node_text) {
+        promptParts.push(`Canvas node (the input for this run):\n${inputPayload.node_text}`);
+      }
+
       if (agentPrompt && agentPrompt.trim()) {
         promptParts.push(`Primary Assignment / Instructions:\n${agentPrompt.trim()}`);
       }
@@ -225,6 +326,19 @@ async function executeAgentModel({ modelId, systemPrompt, agentPrompt, temperatu
             Object.entries(inputPayload.metadata)
               .map(([k, v]) => `- ${k}: ${v}`)
               .join('\n')
+        );
+      }
+
+      // Input target node context for manual workflow execution on canvas node
+      if (inputPayload.triggerType === 'manual' && (inputPayload.node || inputPayload.sourceNode)) {
+        const tn = inputPayload.node || inputPayload.sourceNode;
+        promptParts.push(
+          `Target Node in Focus (Input):\n` +
+            `- ID: "${tn.id}"\n` +
+            `- Title: "${tn.title || tn.name || 'Untitled'}"\n` +
+            `- Type: "${tn.type || 'finding'}"\n` +
+            (tn.description ? `- Description/Content: "${tn.description}"\n` : '') +
+            (tn.metadata && Object.keys(tn.metadata).length > 0 ? `- Metadata: ${JSON.stringify(tn.metadata)}\n` : '')
         );
       }
 
@@ -287,7 +401,8 @@ async function executeAgentModel({ modelId, systemPrompt, agentPrompt, temperatu
         reasoning_effort: reasoningEffort || 'minimal',
         input_data: inputPayload,
         tools: tools || undefined,
-        include_file: Boolean(inputPayload.file || inputPayload.file_bytes_b64 || inputPayload.include_raw_file),
+        include_file: Boolean(inputPayload.file || inputPayload.file_bytes_b64 || inputPayload.include_raw_file || inputPayload.image_path),
+        image_path: inputPayload.image_path || undefined,
       }),
     });
 
@@ -437,6 +552,32 @@ export async function executeWorkflow({
   const runStartTime = Date.now();
   const runId = `run_${workflowId || 'wf'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
+  // Guard: if workflow is empty (0 nodes), report failure immediately so red special thread is kept
+  if (!wfNodes || Object.keys(wfNodes).length === 0) {
+    const totalDuration = ((Date.now() - runStartTime) / 1000).toFixed(2);
+    const runRecord = {
+      id: runId,
+      workflowId,
+      workflowName:
+        workflowId === 'extraction'
+          ? 'Extraction Pipeline'
+          : workflowId === 'connection_synthesis'
+          ? 'Connection Synthesis'
+          : workflowId,
+      trigger: triggerPayload.triggerLabel || `${triggerPayload.triggerType}`,
+      triggerType: triggerPayload.triggerType,
+      status: 'failed',
+      startTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      duration: `${totalDuration}s`,
+      nodes: {},
+      threads: {},
+      createdNodeIds: [],
+      error: 'Empty workflow: no executable nodes configured.',
+    };
+    onProgress?.(runRecord);
+    return runRecord;
+  }
+
   // Build clean run nodes map matching the fixed visual layout
   const runNodes = {};
   Object.entries(wfNodes).forEach(([nId, node]) => {
@@ -500,7 +641,7 @@ export async function executeWorkflow({
 
   // Retain initialPayload permanently across all node runs
   const rawFile = triggerPayload.file || {};
-  const fileName = rawFile.name || triggerPayload.file_name || 'document';
+  const fileName = rawFile.name || triggerPayload.file_name || triggerPayload.node?.title || 'document';
   const detectedCategory = (
     /\.(pdf|docx?|txt|rtf|md|csv)$/i.test(fileName) ? 'document' :
     /\.(png|jpe?g|webp|bmp)$/i.test(fileName) ? 'image' :
@@ -543,7 +684,14 @@ export async function executeWorkflow({
     timestamp: new Date().toISOString(),
   };
 
+  // A manual run on a canvas node: the node's title and description are the input text for every step.
+  if (triggerPayload.triggerType === 'manual') {
+    const n = triggerPayload.node || {};
+    initialPayload.node_text = [n.title, n.description].filter(Boolean).join('\n');
+  }
+
   let currentPayload = { ...initialPayload };
+  const allCreatedNodeIds = [];
 
   // Step 1: Input Node
   const inputNode = runNodes.input || Object.values(runNodes).find((n) => n.type === 'input');
@@ -555,29 +703,52 @@ export async function executeWorkflow({
     await new Promise((r) => setTimeout(r, 120));
 
     inputNode.status = 'completed';
-    inputNode.inputData = {
-      trigger: triggerPayload.triggerType,
-      file_name: fileName,
-      size_bytes: rawFile.size || 0,
-      timestamp: currentPayload.timestamp,
-      ...(Object.keys(mergedMetadata).length > 0 ? { metadata: mergedMetadata } : {}),
-    };
-    inputNode.processInfo = {
-      step: `Event '${triggerPayload.triggerType}' received and queued for processing`,
-      executionTime: '12ms',
-    };
-    inputNode.outputData = {
-      category: detectedCategory,
-      file_name: fileName,
-      status: 'accepted',
-      source_node: initialPayload.source_node,
-      target_node: initialPayload.target_node,
-      sourceNode: initialPayload.sourceNode,
-      targetNode: initialPayload.targetNode,
-      node_pair: initialPayload.node_pair,
-      exploration_id: initialPayload.exploration_id,
-      ...(Object.keys(mergedMetadata).length > 0 ? { metadata: mergedMetadata } : {}),
-    };
+    if (triggerPayload.triggerType === 'manual') {
+      const targetNodeData = triggerPayload.node || triggerPayload.sourceNode || {};
+      inputNode.inputData = {
+        trigger: 'manual',
+        node_id: targetNodeData.id || triggerPayload.nodeId,
+        node_title: targetNodeData.title || targetNodeData.name || 'Node',
+        node_type: targetNodeData.type || 'finding',
+        timestamp: currentPayload.timestamp,
+        ...(targetNodeData.metadata ? { metadata: targetNodeData.metadata } : {}),
+      };
+      inputNode.processInfo = {
+        step: `Manual run initiated on node "${targetNodeData.title || targetNodeData.id}"`,
+        executionTime: '8ms',
+      };
+      inputNode.outputData = {
+        status: 'accepted',
+        trigger: 'manual',
+        node_id: targetNodeData.id || triggerPayload.nodeId,
+        exploration_id: initialPayload.exploration_id,
+        ...(Object.keys(mergedMetadata).length > 0 ? { metadata: mergedMetadata } : {}),
+      };
+    } else {
+      inputNode.inputData = {
+        trigger: triggerPayload.triggerType,
+        file_name: fileName,
+        size_bytes: rawFile.size || 0,
+        timestamp: currentPayload.timestamp,
+        ...(Object.keys(mergedMetadata).length > 0 ? { metadata: mergedMetadata } : {}),
+      };
+      inputNode.processInfo = {
+        step: `Event '${triggerPayload.triggerType}' received and queued for processing`,
+        executionTime: '12ms',
+      };
+      inputNode.outputData = {
+        category: detectedCategory,
+        file_name: fileName,
+        status: 'accepted',
+        source_node: initialPayload.source_node,
+        target_node: initialPayload.target_node,
+        sourceNode: initialPayload.sourceNode,
+        targetNode: initialPayload.targetNode,
+        node_pair: initialPayload.node_pair,
+        exploration_id: initialPayload.exploration_id,
+        ...(Object.keys(mergedMetadata).length > 0 ? { metadata: mergedMetadata } : {}),
+      };
+    }
     onProgress?.(runRecord);
   }
 
@@ -588,6 +759,7 @@ export async function executeWorkflow({
     .map((th) => ({ thread: th, targetId: th.endNodeId }));
 
   let hasFailed = false;
+  let lastAgentOutput = null; // the last agent step's output: becomes the run's result when it creates no canvas nodes
 
   while (queue.length > 0) {
     const { thread, targetId } = queue.shift();
@@ -634,13 +806,7 @@ export async function executeWorkflow({
         activeNodeInput.size_bytes = initialPayload.size_bytes;
         activeNodeInput.mime_type = initialPayload.mime_type;
         activeNodeInput.document_node_id = initialPayload.document_node_id || initialPayload.doc_id;
-        activeNodeInput.metadata = {
-          doc_id: initialPayload.doc_id,
-          file_name: initialPayload.file_name || initialPayload.name,
-          category: initialPayload.category,
-          size_bytes: initialPayload.size_bytes,
-          ...(initialPayload.metadata || {}),
-        };
+        activeNodeInput.metadata = { ...(initialPayload.metadata || {}) };
       }
 
       if (previousOutput) {
@@ -730,13 +896,7 @@ export async function executeWorkflow({
           targetNode: currentPayload.targetNode || initialPayload.targetNode,
           node_pair: currentPayload.node_pair || initialPayload.node_pair,
           exploration_id: currentPayload.exploration_id || initialPayload.exploration_id,
-          metadata: {
-            doc_id: currentPayload.doc_id || initialPayload.doc_id,
-            file_name: currentPayload.file_name || initialPayload.file_name,
-            category: currentPayload.category || initialPayload.category,
-            size_bytes: currentPayload.size_bytes || initialPayload.size_bytes,
-            ...(initialPayload.metadata || {}),
-          },
+          metadata: { ...(initialPayload.metadata || {}) },
         };
       }
     }
@@ -879,7 +1039,9 @@ export async function executeWorkflow({
         effectiveSystemPrompt += `\n\n${WORKFLOW_INSTRUCTIONS}`;
       }
 
+      // The canvas node's own text (manual runs) is the input text, shown in the log as source_text.
       const incomingText =
+        activeNodeInput.node_text ||
         activeNodeInput.agent_synthesis ||
         activeNodeInput.synthesis ||
         activeNodeInput.extracted_text ||
@@ -894,10 +1056,12 @@ export async function executeWorkflow({
 
       const executedTools = [];
       const createdNodeIds = [];
+      const createdNodeTypes = {}; // id -> type, so the connect step can skip subtopics
       let totalDurationMs = 0;
       let finalSynthesis = '';
       let turnInputPayload = { ...agentPayload };
       const progressLog = [];
+      const readsSinceChange = new Set(); // read-only calls made since the last canvas change
       const MAX_AGENT_TURNS = 4;
       let lastSuccessRes = null;
 
@@ -968,11 +1132,34 @@ export async function executeWorkflow({
             }
           }
 
-          const toolResult = await onExecuteTool?.(tc.name, parsedArgs);
+          const readKey = `${tc.name}:${JSON.stringify(parsedArgs)}`;
+          let toolResult;
+          if (READ_ONLY_TOOLS.includes(tc.name) && readsSinceChange.has(readKey)) {
+            toolResult = { success: true, already_read: true };
+          } else {
+            toolResult = await onExecuteTool?.(tc.name, parsedArgs);
+            if (READ_ONLY_TOOLS.includes(tc.name)) {
+              readsSinceChange.add(readKey);
+            } else if (toolResult && !toolResult.error) {
+              readsSinceChange.clear();
+            }
+          }
           if (tc.name === 'create_node' && toolResult?.node?.id) {
             createdNodeIds.push(toolResult.node.id);
+            createdNodeTypes[toolResult.node.id] = toolResult.node.type;
+            if (!allCreatedNodeIds.includes(toolResult.node.id)) {
+              allCreatedNodeIds.push(toolResult.node.id);
+            }
           } else if (tc.name === 'create_nodes' && Array.isArray(toolResult?.nodes)) {
-            toolResult.nodes.forEach((n) => createdNodeIds.push(n.id));
+            toolResult.nodes.forEach((n) => {
+              if (n?.id) {
+                createdNodeIds.push(n.id);
+                createdNodeTypes[n.id] = n.type;
+                if (!allCreatedNodeIds.includes(n.id)) {
+                  allCreatedNodeIds.push(n.id);
+                }
+              }
+            });
           }
 
           executedTools.push({
@@ -988,19 +1175,17 @@ export async function executeWorkflow({
 
         // Link only unconnected root topic/finding nodes to the source document (never subtopics)
         if (resolvedDocNodeId && createdNodeIds.length > 0) {
-          const currentExp = project?.explorationsData?.[targetExploration] || {};
-          const currentConns = Object.values(currentExp.connections || {});
-
-          const unconnectedRootIds = createdNodeIds.filter((nid) => {
-            const nodeObj = currentExp.nodes?.[nid];
-            if (!nodeObj) return false;
-            if (nodeObj.type === 'subtopic') return false;
-            const hasConn = currentConns.some((c) => c.source_node_id === nid || c.target_node_id === nid);
-            return !hasConn;
-          });
+          // Ask the live canvas (through the tool layer) whether each new node already has a connection.
+          // The project snapshot from run start does not contain nodes created during this run.
+          const unconnectedRootIds = [];
+          for (const nid of createdNodeIds) {
+            if (createdNodeTypes[nid] === 'subtopic') continue;
+            const live = await onExecuteTool?.('get_connections', { exploration_id: targetExploration, node_id: nid });
+            if (!live?.error && (live?.count || 0) === 0) unconnectedRootIds.push(nid);
+          }
 
           if (unconnectedRootIds.length > 0) {
-            const connectRes = onExecuteTool?.('connect_nodes', {
+            const connectRes = await onExecuteTool?.('connect_nodes', {
               exploration_id: targetExploration,
               source_node_id: resolvedDocNodeId,
               target_node_ids: unconnectedRootIds,
@@ -1071,7 +1256,11 @@ export async function executeWorkflow({
         agent_synthesis: finalSynthesis,
         executedTools,
       };
-      currentPayload = { ...currentPayload, ...targetNode.outputData };
+      // The image stays on this step's output; it is not merged into what later steps receive.
+      const { image_data_url: _image, ...textOutputs } = targetNode.outputData;
+      void _image;
+      currentPayload = { ...currentPayload, ...textOutputs };
+      lastAgentOutput = targetNode.outputData;
     } else if (targetNode.type === 'output') {
       await new Promise((r) => setTimeout(r, 140));
       targetNode.status = 'completed';
@@ -1102,8 +1291,19 @@ export async function executeWorkflow({
 
   // Finalize run
   const totalDuration = ((Date.now() - runStartTime) / 1000).toFixed(2);
+  const hasExecutableDownstream = Object.values(runNodes).some((n) => n.type === 'agent' || n.type === 'engine');
+  if (!hasExecutableDownstream) {
+    hasFailed = true;
+  }
   runRecord.status = hasFailed ? 'failed' : 'completed';
   runRecord.duration = `${totalDuration}s`;
+  runRecord.createdNodeIds = allCreatedNodeIds;
+  if (lastAgentOutput && (lastAgentOutput.synthesis || lastAgentOutput.image_path)) {
+    runRecord.resultOutput = {
+      text: lastAgentOutput.synthesis || '',
+      image_path: lastAgentOutput.image_path || '',
+    };
+  }
   onProgress?.(runRecord);
 
   return runRecord;

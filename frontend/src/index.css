@@ -2,6 +2,10 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+/* Text stays selectable and copyable everywhere; only controls ignore selection. */
+button {
   user-select: none;
   -webkit-user-select: none;
 }

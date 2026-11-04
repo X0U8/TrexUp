@@ -1,5 +1,6 @@
 /** test_engine: run an engine on sample input. Returns the output, or the error with line and traceback. */
 import { engineExists, postJson, resolveCode } from './_shared';
+import { markEngineTested } from './testedEngines';
 
 const DEFAULT_TIMEOUT_S = 60;
 const MAX_TIMEOUT_S = 120;
@@ -46,6 +47,7 @@ export async function run(ctx, args) {
     );
     const elapsed = Math.round(performance.now() - start);
     if (httpStatus === 200 && data.status === 'success') {
+      markEngineTested(id, resolveCode(ctx, id));
       return { tested: true, engine_id: id, output: data.output, duration_ms: data.duration_ms || elapsed };
     }
     return {

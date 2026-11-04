@@ -703,3 +703,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.chat-load-earlier {
+  align-self: center;
+  margin: 6px auto 10px;
+  font-size: 12px;
+  padding: 4px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+}

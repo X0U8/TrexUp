@@ -107,8 +107,9 @@
   stroke-width: 2;
 }
 
-/* Workflow Top-Right Action Cluster (Delete Button alongside Minimap) */
-.workflow-top-right-cluster {
+/* Top-Right Action Clusters (Delete Button / Server Status alongside Minimap) */
+.workflow-top-right-cluster,
+.exploration-top-right-cluster {
   position: absolute;
   top: 24px;
   right: 24px;
@@ -119,11 +120,13 @@
   pointer-events: none;
 }
 
-.workflow-top-right-cluster > * {
+.workflow-top-right-cluster > *,
+.exploration-top-right-cluster > * {
   pointer-events: auto;
 }
 
-.workflow-top-right-cluster .minimap-container {
+.workflow-top-right-cluster .minimap-container,
+.exploration-top-right-cluster .minimap-container {
   position: relative;
   top: auto;
   right: auto;
