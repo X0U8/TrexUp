@@ -282,6 +282,8 @@ export default function App() {
       }
     } else if (currentView === 'documents') {
       targetHash = '#/documents';
+    } else if (currentView === 'tools') {
+      targetHash = '#/tools';
     }
 
     if (window.location.hash !== targetHash) {
@@ -311,6 +313,17 @@ export default function App() {
       if (parts[0] === 'documents') {
         isSyncingHashRef.current = true;
         setCurrentView('documents');
+        setIsProjectLoading(false);
+        setTimeout(() => {
+          isSyncingHashRef.current = false;
+          isInitialHashParsedRef.current = true;
+        }, 50);
+        return;
+      }
+
+      if (parts[0] === 'tools') {
+        isSyncingHashRef.current = true;
+        setCurrentView('tools');
         setIsProjectLoading(false);
         setTimeout(() => {
           isSyncingHashRef.current = false;
@@ -397,6 +410,8 @@ export default function App() {
                 setCurrentView('engines');
               } else if (parts[2] === 'documents') {
                 setCurrentView('documents');
+              } else if (parts[2] === 'tools') {
+                setCurrentView('tools');
               } else if (parts[2] === 'logs') {
                 setCurrentView('logs');
               } else {
@@ -444,6 +459,8 @@ export default function App() {
             setCurrentView('engines');
           } else if (parts[2] === 'documents') {
             setCurrentView('documents');
+          } else if (parts[2] === 'tools') {
+            setCurrentView('tools');
           } else if (parts[2] === 'logs') {
             setCurrentView('logs');
           } else {
@@ -1431,10 +1448,13 @@ export default function App() {
     // Build input payload strictly from the dropped node (not whole canvas)
     // Only what the run needs: the node itself, once. File fields only when the node has a file.
     const hasFile = Boolean(sourceNode.file_bytes_b64 || sourceNode.local_path || sourceNode.localPath);
+    const nodeDescription = sourceNode.description || sourceNode.content || sourceNode.text || '';
     const compactNode = {
       id: sourceNode.id,
       title: sourceNode.title || sourceNode.name || 'Untitled Node',
-      description: sourceNode.description || sourceNode.content || '',
+      description: nodeDescription,
+      content: nodeDescription,
+      text: nodeDescription,
       type: sourceNode.type || (sourceNode.category === 'resource' ? 'document' : 'finding'),
       ...(sourceNode.metadata && Object.keys(sourceNode.metadata).length > 0 ? { metadata: sourceNode.metadata } : {}),
       ...(hasFile
@@ -1451,6 +1471,10 @@ export default function App() {
       triggerLabel: `manual: ${wfName} on ${compactNode.title}`,
       node: compactNode,
       nodeId: sourceNode.id,
+      description: nodeDescription,
+      content: nodeDescription,
+      source_text: nodeDescription,
+      text: nodeDescription,
       exploration_id: currentExploration,
       ...(hasFile
         ? {

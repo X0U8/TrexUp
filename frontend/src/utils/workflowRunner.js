@@ -214,7 +214,18 @@ function summarizeToolAction(toolName, args, result) {
  */
 async function executeImageModel({ agentPrompt, inputPayload }) {
   const start = performance.now();
-  const upstream = inputPayload?.synthesis || inputPayload?.agent_synthesis || inputPayload?.node_text || inputPayload?.extracted_text || inputPayload?.text || '';
+  const upstream =
+    inputPayload?.description ||
+    inputPayload?.content ||
+    inputPayload?.source_text ||
+    inputPayload?.synthesis ||
+    inputPayload?.agent_synthesis ||
+    inputPayload?.node_text ||
+    inputPayload?.extracted_text ||
+    inputPayload?.text ||
+    inputPayload?.document_name ||
+    inputPayload?.file_name ||
+    '';
   // The subject comes first (the node's text or the upstream output); the agent prompt sets the style.
   const prompt = [upstream, agentPrompt ? `Style and constraints: ${agentPrompt}` : '']
     .map((p) => (typeof p === 'string' ? p.trim() : ''))
@@ -315,7 +326,10 @@ async function executeAgentModel({ modelId, systemPrompt, agentPrompt, temperatu
         modelId?.toLowerCase().includes('vision') ||
         Boolean(inputPayload.is_vision || inputPayload.escalation?.needs_vision_model);
 
-      if (inputPayload.node_text) {
+      if (inputPayload.description || inputPayload.content) {
+        promptParts.push(`Node Description / Content:\n${inputPayload.description || inputPayload.content}`);
+      }
+      if (inputPayload.node_text && inputPayload.node_text !== inputPayload.description) {
         promptParts.push(`Canvas node (the input for this run):\n${inputPayload.node_text}`);
       }
 
@@ -715,17 +729,55 @@ export async function executeWorkflow({
     timestamp: new Date().toISOString(),
   };
 
+  const nodeDesc =
+    triggerPayload.description ||
+    triggerPayload.content ||
+    triggerPayload.source_text ||
+    triggerPayload.text ||
+    triggerPayload.node?.description ||
+    triggerPayload.node?.content ||
+    triggerPayload.node?.text ||
+    triggerPayload.sourceNode?.description ||
+    triggerPayload.sourceNode?.content ||
+    triggerPayload.sourceNode?.text ||
+    '';
+
+  const nodeTitle =
+    triggerPayload.node?.title ||
+    triggerPayload.node?.name ||
+    triggerPayload.sourceNode?.title ||
+    triggerPayload.sourceNode?.name ||
+    triggerPayload.title ||
+    '';
+
+  if (nodeDesc) {
+    initialPayload.description = nodeDesc;
+    initialPayload.content = nodeDesc;
+    initialPayload.source_text = nodeDesc;
+    initialPayload.text = nodeDesc;
+  }
+
   // A manual run on a canvas node: the node's title and description are the input text for every step.
   if (triggerPayload.triggerType === 'manual') {
-    const n = triggerPayload.node || {};
-    initialPayload.node_text = [n.title, n.description].filter(Boolean).join('\n');
+    const n = triggerPayload.node || triggerPayload.sourceNode || {};
+    const nTitle = n.title || n.name || nodeTitle;
+    const nDesc = n.description || n.content || n.text || nodeDesc;
+    initialPayload.description = nDesc;
+    initialPayload.content = nDesc;
+    initialPayload.source_text = nDesc;
+    initialPayload.text = nDesc;
+    initialPayload.node_text = [nTitle, nDesc].filter(Boolean).join('\n\n');
   }
 
   const customText = triggerPayload.text || triggerPayload.source_text || triggerPayload.extracted_text || triggerPayload.prompt || '';
   if (customText) {
     initialPayload.text = customText;
     initialPayload.extracted_text = customText;
-    initialPayload.node_text = customText;
+    if (!initialPayload.description) {
+      initialPayload.description = customText;
+      initialPayload.content = customText;
+      initialPayload.source_text = customText;
+    }
   }
 
   let currentPayload = { ...initialPayload };
@@ -845,6 +897,11 @@ export async function executeWorkflow({
         activeNodeInput.mime_type = initialPayload.mime_type;
         activeNodeInput.document_node_id = initialPayload.document_node_id || initialPayload.doc_id;
         activeNodeInput.metadata = { ...(initialPayload.metadata || {}) };
+        if (initialPayload.description) activeNodeInput.description = initialPayload.description;
+        if (initialPayload.content) activeNodeInput.content = initialPayload.content;
+        if (initialPayload.source_text) activeNodeInput.source_text = initialPayload.source_text;
+        if (initialPayload.node_text) activeNodeInput.node_text = initialPayload.node_text;
+        if (initialPayload.text) activeNodeInput.text = initialPayload.text;
       }
 
       if (previousOutput) {
@@ -858,9 +915,11 @@ export async function executeWorkflow({
         activeNodeInput.file_path = initialPayload.file_path || initialPayload.local_path;
         activeNodeInput.local_path = initialPayload.local_path || initialPayload.file_path;
         activeNodeInput.cloudinaryUrl = initialPayload.cloudinaryUrl;
-        if (initialPayload.text) {
-          activeNodeInput.text = initialPayload.text;
-        }
+        if (initialPayload.text) activeNodeInput.text = initialPayload.text;
+        if (initialPayload.description) activeNodeInput.description = initialPayload.description;
+        if (initialPayload.content) activeNodeInput.content = initialPayload.content;
+        if (initialPayload.source_text) activeNodeInput.source_text = initialPayload.source_text;
+        if (initialPayload.node_text) activeNodeInput.node_text = initialPayload.node_text;
       } else {
         delete activeNodeInput.file;
         delete activeNodeInput.file_bytes_b64;
@@ -887,6 +946,10 @@ export async function executeWorkflow({
       if (inputMetadata || inputFile) {
         activeNodeInput.doc_id = activeNodeInput.doc_id || initialPayload.doc_id || currentPayload.doc_id;
         activeNodeInput.file_name = activeNodeInput.file_name || initialPayload.file_name || currentPayload.file_name;
+        if (initialPayload.description && !activeNodeInput.description) activeNodeInput.description = initialPayload.description;
+        if (initialPayload.content && !activeNodeInput.content) activeNodeInput.content = initialPayload.content;
+        if (initialPayload.source_text && !activeNodeInput.source_text) activeNodeInput.source_text = initialPayload.source_text;
+        if (initialPayload.node_text && !activeNodeInput.node_text) activeNodeInput.node_text = initialPayload.node_text;
       }
       sourceScope = inputFile && previousOutput ? 'both' : (inputFile ? 'original' : 'previous');
     } else {
@@ -907,6 +970,11 @@ export async function executeWorkflow({
         activeNodeInput = {
           ...initialPayload,
           ...currentPayload,
+          description: currentPayload.description || initialPayload.description,
+          content: currentPayload.content || initialPayload.content,
+          node_text: currentPayload.node_text || initialPayload.node_text,
+          source_text: currentPayload.source_text || initialPayload.source_text,
+          text: currentPayload.text || initialPayload.text,
           doc_id: initialPayload.doc_id || currentPayload.doc_id,
           file: initialPayload.file || currentPayload.file,
           file_name: initialPayload.file_name || currentPayload.file_name,
@@ -923,6 +991,11 @@ export async function executeWorkflow({
         const { file, file_bytes_b64, file_path, local_path, cloudinaryUrl, raw_file, binary, ...safePrevOutputs } = currentPayload;
         activeNodeInput = {
           ...safePrevOutputs,
+          description: currentPayload.description || initialPayload.description,
+          content: currentPayload.content || initialPayload.content,
+          node_text: currentPayload.node_text || initialPayload.node_text,
+          source_text: currentPayload.source_text || initialPayload.source_text,
+          text: currentPayload.text || initialPayload.text,
           doc_id: currentPayload.doc_id || initialPayload.doc_id,
           file_name: currentPayload.file_name || initialPayload.file_name,
           document_name: currentPayload.document_name || initialPayload.document_name || initialPayload.file_name,
@@ -952,10 +1025,21 @@ export async function executeWorkflow({
         // HTTP 200: Engine completed successfully
         targetNode.status = 'completed';
         thread.status = 'completed';
-        const engineText = activeNodeInput.extracted_text || activeNodeInput.text || '';
+        const engineText =
+          activeNodeInput.description ||
+          activeNodeInput.content ||
+          activeNodeInput.extracted_text ||
+          activeNodeInput.text ||
+          '';
+        const engineDesc =
+          activeNodeInput.description ||
+          activeNodeInput.content ||
+          activeNodeInput.source_text ||
+          (engineText.trim() ? engineText : '');
+
         targetNode.inputData = {
           document: activeNodeInput.file_name || activeNodeInput.document_name,
-          ...(engineText.trim() ? { source_text: engineText } : {}),
+          ...(engineDesc ? { description: engineDesc, source_text: engineDesc } : {}),
           category: activeNodeInput.category,
           size_bytes: activeNodeInput.size_bytes,
           input_source: sourceScope,
@@ -1080,6 +1164,9 @@ export async function executeWorkflow({
 
       // The canvas node's own text (manual runs) is the input text, shown in the log as source_text.
       const incomingText =
+        activeNodeInput.description ||
+        activeNodeInput.content ||
+        activeNodeInput.source_text ||
         activeNodeInput.node_text ||
         activeNodeInput.agent_synthesis ||
         activeNodeInput.synthesis ||
@@ -1278,9 +1365,15 @@ export async function executeWorkflow({
 
       targetNode.status = 'completed';
       thread.status = 'completed';
+      const agentDesc =
+        activeNodeInput.description ||
+        activeNodeInput.content ||
+        activeNodeInput.source_text ||
+        (typeof incomingText === 'string' && incomingText.trim() ? incomingText : '');
+
       targetNode.inputData = {
         document: activeNodeInput.document_name || activeNodeInput.file_name || activeNodeInput.file?.name,
-        ...(typeof incomingText === 'string' && incomingText.trim() ? { source_text: incomingText } : {}),
+        ...(agentDesc ? { description: agentDesc, source_text: agentDesc } : {}),
         category: activeNodeInput.category,
         input_source: sourceScope,
       };

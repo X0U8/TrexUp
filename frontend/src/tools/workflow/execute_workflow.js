@@ -52,6 +52,8 @@ export async function run(ctx, args) {
     file_name: data.file_name || 'workflow_input.txt',
     exploration_id: data.exploration_id || 'exploration_01',
     metadata: data.metadata || {},
+    description: data.description || text,
+    content: data.content || data.description || text,
     text,
     source_text: text,
     extracted_text: text,
