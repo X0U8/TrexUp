@@ -2503,6 +2503,44 @@ def run(input_data, context=None):
     saveProject(updatedProject).catch((err) => console.error('Failed to save renamed exploration:', err));
   };
 
+  const handleDeleteExploration = (expToDelete = currentExploration) => {
+    const proj = currentProjectRef.current || currentProject;
+    const currentList = explorations.filter((e) => e !== expToDelete);
+    const nextList = currentList.length > 0 ? currentList : ['exploration_01'];
+    const nextExp = nextList.includes(currentExploration) && expToDelete !== currentExploration
+      ? currentExploration
+      : nextList[0];
+
+    const currentExpData = { ...(proj?.explorationsData || {}) };
+    delete currentExpData[expToDelete];
+    if (Object.keys(currentExpData).length === 0) {
+      currentExpData['exploration_01'] = { nodes: {}, connections: {} };
+    }
+
+    const targetNodes = currentExpData[nextExp]?.nodes || {};
+    const targetConnections = currentExpData[nextExp]?.connections || {};
+
+    setExplorations(nextList);
+    setCurrentExploration(nextExp);
+    setNodes(targetNodes);
+    setConnections(targetConnections);
+    setSelectedDocNode(null);
+
+    if (proj) {
+      const updatedProject = {
+        ...proj,
+        explorations: nextList,
+        explorationsData: currentExpData,
+        currentExploration: nextExp,
+        updatedAt: new Date().toISOString(),
+      };
+      currentProjectRef.current = updatedProject;
+      setCurrentProject(updatedProject);
+      saveProject(updatedProject).catch((err) => console.error('Failed to save after deleting exploration:', err));
+    }
+    setNotification('Exploration deleted');
+  };
+
   // Engine tools are async (validation and test runs call the Python server); callers must await.
   const handleExecuteEngineTool = async (toolName, args) => {
     const proj = currentProjectRef.current;
@@ -3246,6 +3284,21 @@ def run(input_data, context=None):
         <>
           {/* Top-Right Exploration Cluster: Server Status Indicator + Minimap */}
           <div className="exploration-top-right-cluster">
+            {Object.keys(nodes || {}).length === 0 && explorations.length > 1 && (
+              <button
+                type="button"
+                className="exploration-empty-delete-btn"
+                title={`Delete empty ${currentExploration}`}
+                onClick={() => handleDeleteExploration(currentExploration)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" width="13" height="13">
+                  <path d="M3 6h18" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+                <span>Delete exploration</span>
+              </button>
+            )}
             <ServerStatusIndicator />
             <Minimap
               nodes={nodes}

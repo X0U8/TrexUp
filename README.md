@@ -134,6 +134,17 @@ Open your browser and navigate to:
 http://localhost:5173
 ```
 
+### 3. Quick Testing (Sample Demo Resources)
+Pre-packaged demo files used in the demo are provided in [`sample_resources/`](./sample_resources) to test the platform immediately:
+- **`promptNCE.pdf`**: Research paper PDF (tests document ingestion, text extraction, and finding synthesis).
+- **`AI_podcast.mp3`**: Audio recording (tests speech-to-text transcription via `muse-voice-transcribe-1.0`).
+- **`note.txt`**: Text note (tests finding synthesis and manual workflow execution).
+
+**How to test:**
+1. Open the **Canvas** view and drag any file from `sample_resources/` directly onto the canvas.
+2. The automated ingestion pipeline validates the file type, extracts content, and commits structured nodes to your graph.
+3. Drag any workflow from the sidebar onto a canvas node (or connect two nodes) to execute automated analysis and image generation!
+
 ---
 
 ## Tech Stack
