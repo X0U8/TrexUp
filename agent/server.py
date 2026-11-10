@@ -32,6 +32,49 @@ EXPERIMENTS_STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)
 os.makedirs(EXPERIMENTS_STORAGE_DIR, exist_ok=True)
 
 
+def ensure_virtualenv_and_reexec():
+    """If running under global/system Python, auto-switches to or creates a local .venv so macOS/Linux permissions never fail."""
+    in_venv = (sys.prefix != sys.base_prefix) or ("VIRTUAL_ENV" in os.environ)
+    if in_venv:
+        return
+
+    agent_dir = os.path.dirname(os.path.abspath(__file__))
+    venv_dir = os.path.join(agent_dir, ".venv")
+    venv_py = os.path.join(venv_dir, "Scripts", "python.exe") if os.name == "nt" else os.path.join(venv_dir, "bin", "python")
+
+    # If .venv does not exist, create it locally
+    if not (os.path.isfile(venv_py) and os.access(venv_py, os.X_OK)):
+        try:
+            print(f"[Setup] Creating local virtual environment at {venv_dir}...")
+            subprocess.check_call([sys.executable, "-m", "venv", venv_dir], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            print(f"[Setup Warning] Could not auto-create virtualenv: {e}")
+
+    # Ensure required dependencies exist in .venv
+    req_file = os.path.join(agent_dir, "requirements.txt")
+    if os.path.isfile(venv_py) and os.path.isfile(req_file):
+        try:
+            subprocess.check_call([venv_py, "-c", "import openai, pypdf"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            try:
+                print("[Setup] Installing required dependencies into local .venv...")
+                subprocess.check_call([venv_py, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "-r", req_file])
+                print("[Setup] Successfully installed dependencies into .venv.")
+            except Exception as e:
+                print(f"[Setup Warning] Could not install requirements into .venv: {e}")
+
+    # Re-execute this process using the venv Python
+    if os.path.isfile(venv_py) and os.access(venv_py, os.X_OK):
+        print(f"[Setup] Auto-switching to local virtual environment ({venv_py})...")
+        try:
+            os.execv(venv_py, [venv_py] + sys.argv)
+        except Exception as e:
+            print(f"[Setup Warning] Could not re-exec via venv: {e}")
+
+
+ensure_virtualenv_and_reexec()
+
+
 def ensure_dependencies():
     """Checks and automatically installs required dependencies if missing."""
     required = {
@@ -46,8 +89,6 @@ def ensure_dependencies():
             missing.append((mod, pkg))
 
     if missing:
-        import subprocess
-
         for mod, pkg in missing:
             print(f"[Setup] Missing dependency '{mod}'. Auto-installing {pkg}...")
             installed = False
@@ -59,7 +100,14 @@ def ensure_dependencies():
 
             if not installed:
                 try:
-                    subprocess.check_call([sys.executable, "-m", "pip", "install", "--break-system-packages", pkg])
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", "--break-system-packages", pkg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    installed = True
+                except Exception:
+                    pass
+
+            if not installed:
+                try:
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "--break-system-packages", pkg])
                     installed = True
                 except Exception as e:
                     print(f"[Setup Warning] Could not auto-install {pkg}: {e}")
