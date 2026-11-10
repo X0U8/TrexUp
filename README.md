@@ -2,7 +2,6 @@
   <img src="./assets/logo.jpg" alt="Trex Logo" width="120" style="border-radius: 50%;" />
   <h1>Trex</h1>
   <p><strong>A visual multi-agent investigation & workflow platform powered by Meta AI models.</strong></p>
-  <p><em>Built in a 10-day sprint.</em></p>
 </div>
 
 ---
